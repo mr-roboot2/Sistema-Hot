@@ -1,0 +1,63 @@
+========================================================
+  MediaCMS — CHECKLIST ANTES DE PUBLICAR
+========================================================
+
+1. EDITE includes/config.php
+   ──────────────────────────
+   ✏️  DB_NAME  → nome do banco na hospedagem
+   ✏️  DB_USER  → usuário do banco (não use "root")
+   ✏️  DB_PASS  → senha do banco
+   ✏️  SITE_URL → URL do seu site
+                  Ex: https://meusite.com.br
+                  (sem barra no final, com https se tiver SSL)
+
+2. BANCO DE DADOS
+   ───────────────
+   ✏️  Crie o banco na hospedagem
+   ✏️  Importe o arquivo database.sql via phpMyAdmin
+   ✏️  Execute também os ALTER TABLE do database.sql
+       caso o banco já exista
+
+3. PASTA UPLOADS
+   ──────────────
+   ✏️  Dê permissão 755 (ou 775) à pasta uploads/
+   Comando FTP/SSH: chmod -R 755 uploads/
+
+4. ADMIN PADRÃO
+   ─────────────
+   Após importar o banco, crie o admin pelo phpMyAdmin:
+   INSERT INTO users (name,email,password,role) VALUES
+   ('Admin','admin@seusite.com',
+    '$2y$10$...', -- use um hash gerado em https://bcrypt-generator.com
+    'admin');
+
+   OU use o diag.php temporariamente para criar/resetar:
+   https://seusite.com.br/cms/diag.php
+   ⚠️  APAGUE o diag.php após usar!
+
+5. CONFIGURAÇÕES NO PAINEL ADMIN
+   ────────────────────────────────
+   ✏️  Admin > Configurações > Nome do site
+   ✏️  Admin > Configurações > URL da API Helix PIX
+   ✏️  Admin > Planos > crie seus planos com preço
+   ✏️  Admin > Configurações > Exigir login (ativar)
+
+6. SSL / HTTPS
+   ─────────────
+   Se tiver SSL, descomente no .htaccess as linhas:
+   # RewriteCond %{HTTPS} off
+   # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+7. ARQUIVOS PARA APAGAR APÓS PUBLICAR
+   ────────────────────────────────────
+   ❌  diag.php
+   ❌  LEIA-ME-ANTES-DE-PUBLICAR.txt
+   ❌  database.sql (mova para fora da pasta pública)
+
+8. WEBHOOK (se usar Telegram/PushinPay)
+   ──────────────────────────────────────
+   URL do webhook: https://seusite.com.br/cms/webhook.php
+   URL callback Helix: https://seusite.com.br/cms/helix-callback.php
+   Configure o secret em Admin > Webhook
+
+========================================================

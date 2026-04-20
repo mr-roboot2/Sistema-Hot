@@ -1,0 +1,4 @@
+# Renomeie para .htaccess para ativar proteção de uploads
+# Compatível com protect_uploads=1 nas Configurações do CMS
+Order Deny,Allow
+Deny from all

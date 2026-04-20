@@ -1,0 +1,40 @@
+/* KPI cards */
+.fi-kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;position:relative;overflow:hidden}
+.fi-kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0}
+.fi-kpi.green::before{background:var(--success)}
+.fi-kpi.purple::before{background:var(--accent)}
+.fi-kpi.orange::before{background:var(--warning)}
+.fi-kpi.red::before{background:var(--danger)}
+.fi-kpi.pink::before{background:var(--accent2)}
+.fi-kpi.teal::before{background:#0fd494}
+.kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:8px}
+.kpi-num{font-family:'Roboto',sans-serif;font-size:24px;font-weight:800;line-height:1;margin-bottom:4px}
+.kpi-sub{font-size:11px;color:var(--muted)}
+/* Table */
+.ft{width:100%;border-collapse:collapse}
+.ft th{padding:9px 14px;text-align:left;font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);white-space:nowrap}
+.ft td{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+.ft tbody tr:last-child td{border:none}
+.ft tbody tr:hover td{background:var(--surface2)}
+/* Status badges */
+.sb{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
+.sb-paid   {background:rgba(16,185,129,.15);color:var(--success)}
+.sb-pending{background:rgba(245,158,11,.15);color:var(--warning)}
+.sb-expired{background:rgba(107,107,128,.15);color:var(--muted2)}
+.sb-failed {background:rgba(255,77,106,.15);color:var(--danger)}
+/* User cards */
+.uc{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:13px 15px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:border-color .2s,background .15s}
+.uc:hover{border-color:var(--accent);background:rgba(124,106,255,.04)}
+.uc.active-filter{border-color:var(--accent);background:rgba(124,106,255,.08)}
+/* Filter bar */
+.fbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.fbar .form-control{font-size:12px;padding:7px 10px;height:34px}
+/* Bar chart */
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.bar-label{width:64px;font-size:11px;color:var(--muted);text-align:right;flex-shrink:0}
+.bar-track{flex:1;height:24px;background:var(--surface2);border-radius:6px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;display:flex;align-items:center;padding-left:10px;transition:width .4s ease}
+/* PIX expand */
+.px-row{display:none;background:var(--surface2)}
+.px-row.open{display:table-row}
+.px-code{font-family:monospace;font-size:10px;word-break:break-all;color:var(--muted2);line-height:1.5}

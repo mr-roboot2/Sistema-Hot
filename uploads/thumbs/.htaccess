@@ -1,0 +1,10 @@
+Options -Indexes
+<FilesMatch "\.php$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpg|jpeg|png|webp)$">
+        Header set Cache-Control "public, max-age=7776000"
+    </FilesMatch>
+</IfModule>

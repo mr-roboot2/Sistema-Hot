@@ -1,0 +1,29 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c27;--border:#2a2a3a;--accent:#7c6aff;--accent2:#ff6a9e;--text:#e8e8f0;--muted:#6b6b80;--danger:#ff4d6a;--success:#10b981;--warning:#f59e0b}
+body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px}
+.orb{position:fixed;border-radius:50%;filter:blur(90px);opacity:.1;pointer-events:none}
+.orb-1{width:600px;height:600px;background:var(--danger);top:-200px;left:50%;transform:translateX(-50%);transition:background 1s}
+.wrap{position:relative;z-index:1;max-width:460px;width:100%}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:36px;transition:border-color .4s}
+.icon-wrap{width:80px;height:80px;border-radius:50%;background:rgba(255,77,106,.12);border:2px solid rgba(255,77,106,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 24px;transition:all .4s}
+h1{font-family:'Roboto',sans-serif;font-size:26px;font-weight:800;margin-bottom:10px;transition:color .4s}
+.sub{color:var(--muted);font-size:14px;line-height:1.7;margin-bottom:6px}
+.divider{border:none;border-top:1px solid var(--border);margin:20px 0}
+.btn-green{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:14px;margin-bottom:10px;background:linear-gradient(135deg,var(--success),#0d9a6e);color:#fff;border-radius:11px;text-decoration:none;font-size:15px;font-weight:700;font-family:'Roboto',sans-serif;transition:opacity .2s}
+.btn-green:hover{opacity:.88}
+.btn-check{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:13px;background:linear-gradient(135deg,var(--accent),#5b4ef0);color:#fff;border:none;border-radius:11px;font-size:14px;font-weight:700;font-family:'Roboto',sans-serif;cursor:pointer;transition:opacity .2s;margin-bottom:10px}
+.btn-check:hover:not(:disabled){opacity:.9}
+.btn-check:disabled{opacity:.5;cursor:not-allowed}
+.btn-back{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:11px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:13px;text-decoration:none;transition:background .2s}
+.btn-back:hover{background:var(--surface2)}
+.msg{margin-top:12px;padding:11px 14px;border-radius:9px;font-size:13px;font-weight:500;display:none;align-items:center;gap:8px;justify-content:center}
+.msg.show{display:flex}
+.msg-check{background:rgba(124,106,255,.1);border:1px solid rgba(124,106,255,.25);color:var(--accent)}
+.msg-err  {background:rgba(255,77,106,.1);border:1px solid rgba(255,77,106,.25);color:var(--danger)}
+.msg-ok   {background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:var(--success)}
+.spin{width:15px;height:15px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.icon-wrap.checking{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.auto-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warning);animation:blink 2s infinite;margin-right:5px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}

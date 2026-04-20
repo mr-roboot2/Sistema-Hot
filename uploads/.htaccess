@@ -1,0 +1,33 @@
+# Bloqueia execução de PHP nos uploads (segurança crítica)
+<FilesMatch "\.php$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Bloqueia acesso direto à pasta de chunks temporários
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^chunks/ - [F,L]
+</IfModule>
+
+# Bloqueia listagem
+Options -Indexes
+
+# ── Cache de mídia ──────────────────────────────
+<IfModule mod_headers.c>
+    <FilesMatch "\.(mp4|webm|ogg|mov|avi|mkv)$">
+        Header set Cache-Control "public, max-age=604800"
+        Header set Accept-Ranges bytes
+    </FilesMatch>
+    <FilesMatch "\.(jpg|jpeg|png|gif|webp)$">
+        Header set Cache-Control "public, max-age=7776000"
+    </FilesMatch>
+</IfModule>
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType video/mp4   "access plus 7 days"
+    ExpiresByType video/webm  "access plus 7 days"
+    ExpiresByType image/jpeg  "access plus 90 days"
+    ExpiresByType image/png   "access plus 90 days"
+    ExpiresByType image/webp  "access plus 90 days"
+</IfModule>

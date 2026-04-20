@@ -1,0 +1,149 @@
+# ── Segurança ──────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # HTTPS — descomente quando tiver SSL:
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Bloqueia acesso direto à pasta includes
+    RewriteRule ^includes/ - [F,L]
+
+    # ── URLs Limpas (sem .php) ───────────────────
+    # Não aplica em arquivos/diretórios reais
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Rota especial: /assinar/ID → bem-vindo.php?plano=ID
+    RewriteRule ^assinar/([0-9]+)/?$ bem-vindo.php?plano=$1 [QSA,L]
+
+    # Rota especial: /assinar (sem ID) → bem-vindo.php com reset para limpar sessão
+    RewriteRule ^assinar/?$ bem-vindo.php?reset_plan=1 [QSA,L]
+
+    # Rota especial: /post/ID → view.php?id=ID
+    RewriteRule ^post/([0-9]+)/?$ view.php?id=$1 [QSA,L]
+
+    # Páginas comuns sem .php
+    RewriteRule ^(login|logout|register|profile|carteira|renovar|suporte|posts|media|favoritos|minha-indicacao|expired|forgot-password|reset-password|bem-vindo|mensagens)/?$ $1.php [QSA,L]
+
+    # index sem .php (raiz já funciona, mas /index também)
+    RewriteRule ^index/?$ index.php [QSA,L]
+</IfModule>
+
+Options -Indexes
+
+<FilesMatch "\.(sql|log|env|bak|sh|git)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+<Files "diag.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# ── Cache de assets estáticos ───────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    # CSS e JS — 30 dias
+    ExpiresByType text/css                  "access plus 30 days"
+    ExpiresByType application/javascript    "access plus 30 days"
+    ExpiresByType text/javascript           "access plus 30 days"
+    # Imagens — 90 dias
+    ExpiresByType image/jpeg                "access plus 90 days"
+    ExpiresByType image/png                 "access plus 90 days"
+    ExpiresByType image/webp                "access plus 90 days"
+    ExpiresByType image/gif                 "access plus 90 days"
+    ExpiresByType image/svg+xml             "access plus 90 days"
+    # Vídeos — 7 dias
+    ExpiresByType video/mp4                 "access plus 7 days"
+    ExpiresByType video/webm                "access plus 7 days"
+    # Fontes — 1 ano
+    ExpiresByType font/woff2                "access plus 1 year"
+    ExpiresByType font/woff                 "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Cache de assets
+    <FilesMatch "\.(css|js)$">
+        Header set Cache-Control "public, max-age=2592000, immutable"
+    </FilesMatch>
+    <FilesMatch "\.(jpg|jpeg|png|gif|webp|svg|ico)$">
+        Header set Cache-Control "public, max-age=7776000"
+    </FilesMatch>
+    <FilesMatch "\.(mp4|webm|ogg|mov)$">
+        Header set Cache-Control "public, max-age=604800"
+        # Range requests para seek de vídeo funcionar
+        Header set Accept-Ranges bytes
+    </FilesMatch>
+    # Sem cache para PHP
+    <FilesMatch "\.php$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+# ── Compressão GZIP ─────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css text/javascript
+    AddOutputFilterByType DEFLATE application/javascript application/json
+</IfModule>
+
+# ── Uploads: permite arquivos grandes ──────────────────
+<IfModule mod_php.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 512M
+    php_value max_execution_time 600
+    php_value max_input_time 600
+</IfModule>
+
+# ── Limites PHP (OpenLiteSpeed + Apache mod_php) ───────
+<IfModule LiteSpeed>
+    php_value upload_max_filesize 2048M
+    php_value post_max_size       2048M
+    php_value max_execution_time  600
+    php_value max_input_time      600
+    php_value memory_limit        512M
+</IfModule>
+
+<IfModule mod_php.c>
+    php_value upload_max_filesize 2048M
+    php_value post_max_size       2048M
+    php_value max_execution_time  600
+    php_value max_input_time      600
+    php_value memory_limit        512M
+</IfModule>
+
+<IfModule mod_fcgid.c>
+    FcgidMaxRequestLen 2147483648
+</IfModule>
+
+# ── Headers de segurança ───────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ── Cache de arquivos estáticos ────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg  "access plus 1 month"
+    ExpiresByType image/png   "access plus 1 month"
+    ExpiresByType image/webp  "access plus 1 month"
+    ExpiresByType image/gif   "access plus 1 month"
+    ExpiresByType video/mp4   "access plus 1 month"
+    ExpiresByType video/webm  "access plus 1 month"
+    ExpiresByType text/css    "access plus 1 week"
+    ExpiresByType application/javascript "access plus 1 week"
+    # PHP pages: sem cache
+    ExpiresByType text/html   "access plus 0 seconds"
+</IfModule>
+
+
+# ── Compressão ─────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json text/plain
+</IfModule>
+<IfModule mod_brotli.c>
+    AddOutputFilterByType BROTLI_COMPRESS text/html text/css application/javascript application/json
+</IfModule>

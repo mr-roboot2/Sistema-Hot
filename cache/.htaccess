@@ -1,0 +1,3 @@
+# Bloqueia acesso direto à pasta de cache
+Order Allow,Deny
+Deny from all
