@@ -13,6 +13,7 @@ cache/pages/*
 
 # Log do auto-deploy
 deploy.log
+storage/logs/
 
 # Sessões/locks PHP (caso fiquem no projeto por algum motivo)
 sess_*
