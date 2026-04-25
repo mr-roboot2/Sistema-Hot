@@ -2,10 +2,10 @@
 /**
  * deploy.php — Auto-deploy via webhook do GitHub.
  *
- * Mesmo padrão usado em sistema.construtoravalecosta.com/webhook.php:
+ * Padrão:
  *   - HMAC-SHA256 com secret lido de arquivo FORA do public_html
  *   - git pull no diretório atual
- *   - Reload do OpenLiteSpeed via sudo (NOPASSWD configurado em /etc/sudoers.d/)
+ *   - Restart do OpenLiteSpeed via sudo (NOPASSWD em /etc/sudoers.d/)
  *   - Log estruturado em storage/logs/deploy.log
  *
  * Configuração no GitHub:
@@ -129,20 +129,20 @@ $log_entry .= str_repeat('-', 60) . "\n";
 // 11. Sucesso = exit code 0 do git pull
 $success = ($exit_code === 0);
 
-// 12. Reload do OpenLiteSpeed pra aplicar mudanças em .htaccess.
+// 12. Restart do OpenLiteSpeed (pra recarregar .htaccess, OPcache e workers).
 // Requer regra sudoers NOPASSWD em /etc/sudoers.d/deploy-lsws:
-//   <php-user> ALL=(root) NOPASSWD: /usr/local/lsws/bin/lswsctrl reload
-// Se a regra não existir, o reload falha mas o deploy continua sendo reportado.
-$reload_note = 'skipped';
+//   <php-user> ALL=(root) NOPASSWD: /usr/local/lsws/bin/lswsctrl restart
+// Se a regra não existir, o restart falha mas o deploy continua sendo reportado.
+$restart_note = 'skipped';
 if ($success) {
-    $reload_output_lines = [];
-    $reload_exit         = 0;
-    exec('sudo -n /usr/local/lsws/bin/lswsctrl reload 2>&1', $reload_output_lines, $reload_exit);
-    $reload_note = ($reload_exit === 0) ? 'ok' : 'failed exit=' . $reload_exit;
-    $reload_log  = '[' . date('Y-m-d H:i:s') . '] lsws reload: ' . $reload_note . "\n";
-    $reload_log .= trim(implode("\n", $reload_output_lines)) . "\n";
-    $reload_log .= str_repeat('-', 60) . "\n";
-    @file_put_contents($log_dir . '/deploy.log', $reload_log, FILE_APPEND | LOCK_EX);
+    $restart_output_lines = [];
+    $restart_exit         = 0;
+    exec('sudo -n /usr/local/lsws/bin/lswsctrl restart 2>&1', $restart_output_lines, $restart_exit);
+    $restart_note = ($restart_exit === 0) ? 'ok' : 'failed exit=' . $restart_exit;
+    $restart_log  = '[' . date('Y-m-d H:i:s') . '] lsws restart: ' . $restart_note . "\n";
+    $restart_log .= trim(implode("\n", $restart_output_lines)) . "\n";
+    $restart_log .= str_repeat('-', 60) . "\n";
+    @file_put_contents($log_dir . '/deploy.log', $restart_log, FILE_APPEND | LOCK_EX);
 }
 
 http_response_code($success ? 200 : 500);
@@ -152,6 +152,6 @@ echo json_encode([
     'commit'      => $commit,
     'author'      => $author,
     'message'     => $message,
-    'output'      => $output,
-    'lsws_reload' => $reload_note,
+    'output'       => $output,
+    'lsws_restart' => $restart_note,
 ]);
