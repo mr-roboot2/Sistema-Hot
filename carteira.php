@@ -1,9 +1,10 @@
 <?php
 ob_start();
-require_once __DIR__ . '/includes/config.php';
+// auth.php precisa ser o PRIMEIRO require — ele inicia a sessão com o handler
+// correto (Redis se redis_enabled=1 nas settings). Sem isso, esta página usaria
+// o handler default (arquivos) e o anônimo cairia em loop /carteira → /login → /index.
+require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/pix.php';
-
-if (session_status() === PHP_SESSION_NONE) session_start();
 
 // Aceita logado normal, expirado ou pendente — igual ao renovar.php
 $userId = $_SESSION['user_id'] ?? $_SESSION['expired_user_id'] ?? $_SESSION['pending_user_id'] ?? null;
@@ -41,9 +42,6 @@ if (isset($_GET['check_tx'])) {
 }
 
 ob_end_clean();
-
-// Carrega auth.php apenas para renderização da página (header, nav, etc.)
-require_once __DIR__ . '/includes/auth.php';
 
 $pageTitle = 'Minha Carteira';
 $userId    = (int)$user['id'];

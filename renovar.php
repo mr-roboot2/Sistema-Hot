@@ -1,9 +1,10 @@
 <?php
-require_once __DIR__ . '/includes/config.php';
+// auth.php precisa ser o PRIMEIRO require — inicia a sessão com o handler
+// correto (Redis se redis_enabled=1). Sem isso a sessão fica em arquivo e
+// não bate com o resto do site, causando "logged-in vira deslogado" entre páginas.
+require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/pix.php';
 require_once __DIR__ . '/includes/affiliate.php';
-
-if (session_status() === PHP_SESSION_NONE) session_start();
 
 $siteName = getSetting('site_name', SITE_NAME);
 

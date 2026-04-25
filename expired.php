@@ -1,6 +1,8 @@
 <?php
-require_once __DIR__ . '/includes/config.php';
-if (session_status() === PHP_SESSION_NONE) session_start();
+// auth.php precisa ser o PRIMEIRO require — inicia a sessão com o handler
+// correto (Redis se redis_enabled=1). Sem isso a sessão fica em arquivo e
+// não bate com o resto do site.
+require_once __DIR__ . '/includes/auth.php';
 
 if (!empty($_SESSION['user_id'])) { header('Location: ' . SITE_URL . '/index'); exit; }
 
