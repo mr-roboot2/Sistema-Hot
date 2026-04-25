@@ -1,0 +1,42 @@
+# Credenciais e config local — produção mantém a sua própria
+includes/config.php
+
+# Uploads de usuários (geridos em runtime, nunca devem ir pro repo)
+uploads/*
+!uploads/index.php
+!uploads/.htaccess
+!uploads/thumbs/.htaccess
+
+# Cache de páginas geradas em runtime
+cache/pages/*
+!cache/.htaccess
+
+# Log do auto-deploy
+deploy.log
+
+# Sessões/locks PHP (caso fiquem no projeto por algum motivo)
+sess_*
+*.lock
+
+# Logs gerais
+*.log
+
+# Lixo de SO
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+
+# Backups acidentais
+*.bak
+*.orig
+*.rej

@@ -74,7 +74,7 @@ function createPixCharge(int $userId, int $planId, float $amount): array {
 
 function checkPixStatus(int $txId): array {
     $db   = getDB();
-    $stmt = $db->prepare('SELECT id,user_id,plan_id,external_id,status,pix_expires_at,pix_code FROM transactions WHERE id=?');
+    $stmt = $db->prepare('SELECT id,user_id,plan_id,external_id,status,pix_expires_at,pix_code,amount FROM transactions WHERE id=?');
     $stmt->execute([$txId]);
     $tx = $stmt->fetch();
     if (!$tx) return ['status'=>'not_found'];
@@ -82,8 +82,36 @@ function checkPixStatus(int $txId): array {
     // Já está pago no banco
     if ($tx['status'] === 'paid') return ['status'=>'paid'];
 
-    // PIX expirado — marca no banco para não ficar como pending para sempre
-    if (!empty($tx['pix_expires_at']) && strtotime($tx['pix_expires_at']) < time()) {
+    $expired = !empty($tx['pix_expires_at'])
+        && ($pixTs = strtotime($tx['pix_expires_at'])) !== false
+        && $pixTs < time();
+
+    $extId   = $tx['external_id'] ?? '';
+    $baseUrl = rtrim(getSetting('helix_url',''), '/');
+
+    // Mesmo se o prazo local expirou, tenta UMA consulta na Helix —
+    // o usuário pode ter pago segundos antes do timeout e a API já tem isso.
+    if ($extId && $baseUrl) {
+        $resp = helixGet($baseUrl . '/status/' . $extId);
+        if ($resp['ok']) {
+            $body = trim($resp['body']);
+            // Remove BOM se presente
+            if (substr($body, 0, 3) === "\xEF\xBB\xBF") $body = substr($body, 3);
+
+            $data = json_decode($body, true);
+            $isPaid = _pixBodyLooksPaid($data, $body);
+
+            if ($isPaid) {
+                $db->prepare('UPDATE transactions SET status="paid", paid_at=? WHERE id=?')
+                   ->execute([date('Y-m-d H:i:s'), $txId]);
+                activatePlan((int)$tx['user_id'], (int)$tx['plan_id'], (int)$tx['id'], (float)$tx['amount']);
+                return ['status'=>'paid'];
+            }
+        }
+    }
+
+    // Se chegou aqui sem confirmar e o prazo local expirou, marca failed
+    if ($expired) {
         try {
             $db->prepare('UPDATE transactions SET status="failed" WHERE id=? AND status="pending"')
                ->execute([$txId]);
@@ -91,37 +119,57 @@ function checkPixStatus(int $txId): array {
         return ['status'=>'expired'];
     }
 
-    $extId   = $tx['external_id'] ?? '';
-    $baseUrl = rtrim(getSetting('helix_url',''), '/');
-    if (!$extId || !$baseUrl) return ['status'=>'pending'];
-
-    // Consulta Helix: GET {url}/status/{id}
-    $resp = helixGet($baseUrl . '/status/' . $extId);
-    if (!$resp['ok']) return ['status'=>'pending'];
-
-    // Limpa o body e decodifica
-    $body   = trim($resp['body']);
-    $data   = json_decode($body, true);
-    $apiStatus = strtolower(trim($data['status'] ?? ''));
-
-    // Helix retorna "paid" quando pago
-    $isPaid = ($apiStatus === 'paid');
-
-    if ($isPaid) {
-        $db->prepare('UPDATE transactions SET status="paid", paid_at=? WHERE id=?')
-           ->execute([date('Y-m-d H:i:s'), $txId]);
-        activatePlan((int)$tx['user_id'], (int)$tx['plan_id'], (int)$tx['id'], (float)$tx['amount']);
-        return ['status'=>'paid'];
-    }
-
     return ['status'=>'pending'];
 }
 
-function activatePlan(int $userId, int $planId, int $txId = 0, float $saleAmount = 0): void {
+/**
+ * Examina o payload da API (decodificado ou string crua) e tenta determinar
+ * se a transação foi paga. Tolerante a múltiplos formatos de resposta.
+ */
+function _pixBodyLooksPaid($data, string $rawBody): bool {
+    $paidValues = ['paid','approved','completed','confirmed','success','pago','aprovado','concluido','concluído','settled','captured'];
+
+    // 1) Procura recursivamente por valores textuais em arrays
+    if (is_array($data)) {
+        $iter = new RecursiveIteratorIterator(new RecursiveArrayIterator($data));
+        foreach ($iter as $key => $val) {
+            $k = strtolower((string)$key);
+            if ($val === true) {
+                // Flags boolean: paid, is_paid, pago, confirmed
+                if (in_array($k, ['paid','is_paid','pago','confirmed','approved'], true)) return true;
+            }
+            if (is_string($val) || is_numeric($val)) {
+                $v = strtolower(trim((string)$val));
+                if ($v === 'true' && in_array($k, ['paid','is_paid','pago'], true)) return true;
+                if (in_array($v, $paidValues, true)) return true;
+            }
+        }
+    }
+
+    // 2) Fallback: procura palavra-chave no corpo cru (string)
+    //    Útil quando a API retorna texto não-JSON ou shape inesperado.
+    if ($rawBody !== '') {
+        $lower = strtolower($rawBody);
+        if (preg_match('/"(status|payment_status|situacao|state)"\s*:\s*"(paid|approved|completed|confirmed|success|pago|aprovado|concluido|conclu.do|settled)"/i', $rawBody)) {
+            return true;
+        }
+        // ex: "paid": true
+        if (preg_match('/"(paid|is_paid|pago|confirmed|approved)"\s*:\s*(true|1|"true"|"1"|"yes"|"sim")/i', $rawBody)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function activatePlan(int $userId, int $planId, int $txId = 0, float $saleAmount = 0): bool {
     $db   = getDB();
     $plan = $db->prepare('SELECT id,duration_days FROM plans WHERE id=?');
     $plan->execute([$planId]); $plan = $plan->fetch();
-    if (!$plan) return;
+    if (!$plan) {
+        error_log("activatePlan: plano #{$planId} não encontrado (user #{$userId}, tx #{$txId})");
+        return false;
+    }
     $expires = date('Y-m-d H:i:s', time() + $plan['duration_days'] * 86400);
     $db->prepare('UPDATE users SET plan_id=?, expires_at=?, expired_notified=0 WHERE id=?')
        ->execute([$planId, $expires, $userId]);
@@ -130,6 +178,7 @@ function activatePlan(int $userId, int $planId, int $txId = 0, float $saleAmount
         if (!function_exists('affiliateOnPurchase')) require_once __DIR__ . '/affiliate.php';
         affiliateOnPurchase($userId, $txId, $saleAmount);
     }
+    return true;
 }
 
 function helixGet(string $url): array {
@@ -148,11 +197,13 @@ function helixGet(string $url): array {
         if ($body === false) return ['ok'=>false,'error'=>'Falha na requisição'];
         return ['ok'=>true,'body'=>$body];
     }
+    $verifySsl = getSetting('helix_verify_ssl', '1') === '1';
     $ch = curl_init($url);
     curl_setopt_array($ch,[
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 20,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYPEER => $verifySsl,
+        CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
         CURLOPT_HTTPHEADER     => ['Accept: application/json'],
     ]);
     $body = curl_exec($ch);

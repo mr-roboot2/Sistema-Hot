@@ -12,6 +12,7 @@ $error     = '';
 // Garante colunas
 try { $db->exec("ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT NULL"); } catch(Exception $e) {}
 try { $db->exec("ALTER TABLE users ADD COLUMN suspended_at DATETIME DEFAULT NULL"); } catch(Exception $e) {}
+ensureAccessCodeColumn();
 
 // Exportar CSV de usuários
 if (isset($_GET['export_csv']) && csrf_verify($_GET['csrf_token'] ?? '')) {
@@ -64,10 +65,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ??
         }
     }
 
+    // ── Impersonar (entrar como usuário) ─────────
+    if ($action === 'impersonate' && $uid && $uid !== (int)$_SESSION['user_id']) {
+        $target = $db->prepare('SELECT id,name,role FROM users WHERE id=?');
+        $target->execute([$uid]); $target = $target->fetch();
+        if (!$target) {
+            $error = 'Usuário não encontrado.';
+        } else {
+            auditLog('impersonate_user', 'user:'.$uid, $target['name']);
+            $_SESSION['impersonator_user_id']   = (int)$_SESSION['user_id'];
+            $_SESSION['impersonator_user_name'] = $_SESSION['user_name'] ?? 'admin';
+            $_SESSION['impersonator_user_role'] = $_SESSION['user_role'] ?? 'admin';
+            session_regenerate_id(true);
+            $_SESSION['user_id']   = (int)$target['id'];
+            $_SESSION['user_name'] = $target['name'];
+            $_SESSION['user_role'] = $target['role'];
+            header('Location: ' . SITE_URL . '/index');
+            exit;
+        }
+    }
+
+    // ── Regenerar código de acesso ───────────────
+    if ($action === 'regen_code' && $uid) {
+        $newCode = generateAccessCode();
+        $db->prepare('UPDATE users SET access_code=?, is_anonymous=1 WHERE id=?')->execute([$newCode, $uid]);
+        $nm = $db->prepare('SELECT name FROM users WHERE id=?'); $nm->execute([$uid]);
+        auditLog('regen_access_code', 'user:'.$uid, (string)($nm->fetchColumn() ?: ''));
+        $message = 'Novo código: <code style="background:var(--surface2);padding:4px 10px;border-radius:6px;font-weight:700">'.$newCode.'</code>';
+    }
+
     // ── Suspender / Reativar ─────────────────────
     if ($action === 'toggle_suspend' && $uid && $uid !== (int)$_SESSION['user_id']) {
         $cur = $db->prepare('SELECT suspended_at,name FROM users WHERE id=?'); $cur->execute([$uid]); $cur=$cur->fetch();
-        if ($cur['suspended_at']) {
+        if (!$cur) {
+            $error = 'Usuário não encontrado.';
+        } elseif ($cur['suspended_at']) {
             $db->prepare('UPDATE users SET suspended_at=NULL WHERE id=?')->execute([$uid]);
             auditLog('unsuspend_user','user:'.$uid,$cur['name']);
             $message = 'Usuário <b>'.htmlspecialchars($cur['name']).'</b> reativado.';
@@ -82,9 +114,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ??
     if ($action === 'delete' && $uid && $uid !== (int)$_SESSION['user_id']) {
         $nm = $db->prepare('SELECT name FROM users WHERE id=?'); $nm->execute([$uid]);
         $nm = $nm->fetchColumn() ?: 'Usuário';
-        $db->prepare('DELETE FROM users WHERE id=?')->execute([$uid]);
-        auditLog('delete_user', 'user:'.$uid, $nm);
-        $message = 'Usuário <b>'.htmlspecialchars($nm).'</b> removido.';
+
+        // Tabelas que podem referenciar o usuário sem FK com ON DELETE definido.
+        // Limpa antes do DELETE para evitar órfãos e bloqueios por FK criadas
+        // manualmente em produção. Cada exec é tolerante (tabela pode não existir).
+        $cleanups = [
+            'DELETE FROM user_favorites    WHERE user_id = ?',
+            'DELETE FROM post_views        WHERE user_id = ?',
+            'DELETE FROM remember_tokens   WHERE user_id = ?',
+            'DELETE FROM user_sessions     WHERE user_id = ?',
+            'DELETE FROM support_replies   WHERE message_id IN (SELECT id FROM support_messages WHERE user_id = ?)',
+            'DELETE FROM support_messages  WHERE user_id = ?',
+            'DELETE r FROM referrals r JOIN affiliates a ON a.id = r.affiliate_id WHERE a.user_id = ?',
+            'UPDATE referrals SET referred_user_id = NULL WHERE referred_user_id = ?',
+            'DELETE acu FROM affiliate_credits_used  acu JOIN affiliates a ON a.id = acu.affiliate_id WHERE a.user_id = ?',
+            'DELETE aca FROM affiliate_credits_added aca JOIN affiliates a ON a.id = aca.affiliate_id WHERE a.user_id = ?',
+            'DELETE FROM affiliates        WHERE user_id = ?',
+        ];
+
+        try {
+            $db->beginTransaction();
+            foreach ($cleanups as $sql) {
+                try { $db->prepare($sql)->execute([$uid]); } catch(Exception $e) { /* tabela ausente: ok */ }
+            }
+            $db->prepare('DELETE FROM users WHERE id=?')->execute([$uid]);
+            $db->commit();
+            auditLog('delete_user', 'user:'.$uid, $nm);
+            $message = 'Usuário <b>'.htmlspecialchars($nm).'</b> removido.';
+        } catch (Exception $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            $error = 'Falha ao remover usuário: ' . $e->getMessage();
+        }
     }
 
     // ── Adicionar crédito de afiliado ─────────────────────
@@ -144,7 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ??
             if (!$error) {
                 $uNameLog = $db->prepare('SELECT name FROM users WHERE id=?');
                 $uNameLog->execute([$uid]);
-                auditLog('edit_credit', 'user:'.$uid.' amount:'.$rawAmount, $uNameLog->fetchColumn());
+                $uNameVal = $uNameLog->fetchColumn();
+                auditLog('edit_credit', 'user:'.$uid.' amount:'.$rawAmount, $uNameVal !== false ? (string)$uNameVal : 'Unknown');
             }
         }
     }
@@ -171,12 +232,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ??
 }
 
 $search  = trim($_GET['q'] ?? '');
+$onlyAnon = (($_GET['only'] ?? '') === 'anon');
 $page    = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 20;
 $offset  = ($page - 1) * $perPage;
 
-$where  = $search ? 'WHERE (u.name LIKE ? OR u.phone LIKE ? OR u.email LIKE ?)' : '';
-$params = $search ? ["%$search%", "%$search%", "%$search%"] : [];
+$whereParts = [];
+$params     = [];
+if ($search) {
+    $whereParts[] = '(u.name LIKE ? OR u.phone LIKE ? OR u.email LIKE ? OR u.access_code LIKE ?)';
+    array_push($params, "%$search%", "%$search%", "%$search%", "%$search%");
+}
+if ($onlyAnon) {
+    $whereParts[] = 'u.is_anonymous = 1';
+}
+$where = $whereParts ? 'WHERE ' . implode(' AND ', $whereParts) : '';
+
+// Contagem de anônimos ativos (com plano no futuro)
+$anonCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE is_anonymous=1")->fetchColumn();
 
 $totalUsers = $db->prepare("SELECT COUNT(*) FROM users u $where");
 $totalUsers->execute($params); $totalUsers = (int)$totalUsers->fetchColumn();
@@ -220,12 +293,21 @@ require __DIR__ . '/../includes/header.php';
 <div class="card" style="overflow:hidden">
   <div style="padding:15px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <span style="font-family:'Roboto',sans-serif;font-size:16px;font-weight:700">Usuários (<?= $totalUsers ?>)</span>
+    <?php if ($anonCount > 0): ?>
+    <a href="?<?= $onlyAnon ? '' : 'only=anon' ?>"
+       style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;text-decoration:none;
+              background:<?= $onlyAnon ? 'var(--accent)' : 'rgba(124,106,255,.15)' ?>;
+              color:<?= $onlyAnon ? '#fff' : 'var(--accent)' ?>">
+       🕶️ Anônimos (<?= $anonCount ?>) <?= $onlyAnon ? '✕' : '' ?>
+    </a>
+    <?php endif; ?>
     <form method="GET" style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
+      <?php if ($onlyAnon): ?><input type="hidden" name="only" value="anon"><?php endif; ?>
       <input type="text" name="q" value="<?= htmlspecialchars($search) ?>"
-             placeholder="Buscar por nome, telefone ou email..."
+             placeholder="Buscar por nome, email, telefone ou código..."
              class="form-control" style="width:260px;padding:7px 12px;font-size:13px">
       <button type="submit" class="btn btn-secondary" style="padding:7px 14px;font-size:13px">🔍</button>
-      <?php if ($search): ?><a href="?" class="btn btn-secondary" style="padding:7px 12px;font-size:13px">✕</a><?php endif; ?>
+      <?php if ($search || $onlyAnon): ?><a href="?" class="btn btn-secondary" style="padding:7px 12px;font-size:13px">✕</a><?php endif; ?>
     </form>
     <a href="?export_csv=1&csrf_token=<?= csrf_token() ?>" class="btn btn-secondary" style="padding:7px 12px;font-size:13px;white-space:nowrap">📥 CSV</a>
   </div>
@@ -254,11 +336,21 @@ require __DIR__ . '/../includes/header.php';
             <div style="font-size:13px;font-weight:600">
               <?= htmlspecialchars($u['name']) ?>
               <?php if ($isSelf): ?><span style="font-size:10px;background:rgba(124,106,255,.15);color:var(--accent);padding:1px 6px;border-radius:10px;margin-left:4px">Você</span><?php endif; ?>
+              <?php if (!empty($u['is_anonymous'])): ?><span style="font-size:10px;background:rgba(255,106,158,.15);color:var(--accent2);padding:1px 6px;border-radius:10px;margin-left:4px">🕶️ Anônimo</span><?php endif; ?>
             </div>
-            <div class="txt-muted-xs"><?= htmlspecialchars($u['email']) ?></div>
+            <?php if (!empty($u['access_code'])): ?>
+              <div class="txt-muted-xs" style="font-family:'Courier New',monospace;color:var(--accent);font-weight:700;letter-spacing:.5px">
+                🔐 <?= htmlspecialchars($u['access_code']) ?>
+                <button type="button" onclick="copyCode(this,'<?= htmlspecialchars($u['access_code']) ?>')"
+                        style="background:none;border:none;color:var(--muted);cursor:pointer;padding:0 4px;font-size:11px" title="Copiar">📋</button>
+              </div>
+            <?php endif; ?>
+            <?php if (empty($u['is_anonymous'])): ?>
+              <div class="txt-muted-xs"><?= htmlspecialchars($u['email']) ?></div>
               <?php if (!empty($u['phone'])): ?>
               <div class="txt-muted-xs">📱 <?= htmlspecialchars($u['phone']) ?></div>
               <?php endif; ?>
+            <?php endif; ?>
           </div>
         </div>
       </td>
@@ -275,17 +367,33 @@ require __DIR__ . '/../includes/header.php';
       </td>
       <td class="txt-muted-sm"><?= date('d/m/Y', strtotime($u['created_at'])) ?></td>
       <td style="text-align:right">
-        <div style="display:flex;gap:5px;justify-content:flex-end">
+        <div style="display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap">
+          <?php if (!$isSelf): ?>
+          <form method="POST" style="display:inline" onsubmit="return confirm('Entrar como <?= htmlspecialchars(addslashes($u['name'])) ?>?\n\nVocê pode voltar ao seu admin depois.')">
+            <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+            <input type="hidden" name="action" value="impersonate">
+            <input type="hidden" name="uid" value="<?= $u['id'] ?>">
+            <button type="submit" class="btn btn-secondary" style="padding:5px 10px;font-size:11px;color:var(--accent2);border-color:rgba(255,106,158,.35)" title="Acessar como este usuário">👤 Entrar</button>
+          </form>
+          <?php endif; ?>
           <button type="button" class="btn btn-secondary" style="padding:5px 10px;font-size:11px"
                   onclick='openEdit(<?= json_encode(["id"=>$u["id"],"name"=>$u["name"],"email"=>$u["email"],"phone"=>$u["phone"]??'',"role"=>$u["role"]]) ?>)'>
-            ✏️ Editar
+            ✏️
           </button>
           <button type="button" class="btn btn-secondary" style="padding:5px 10px;font-size:11px;color:var(--accent);border-color:rgba(124,106,255,.35)"
-                  onclick='openCredit(<?= $u["id"] ?>, <?= json_encode($u["name"]) ?>)'>
+                  onclick='openCredit(<?= $u["id"] ?>, <?= json_encode($u["name"]) ?>)' title="Ajustar saldo">
             💳
           </button>
+          <?php if (!empty($u['is_anonymous'])): ?>
+          <form method="POST" style="display:inline" onsubmit="return confirm('Gerar NOVO código para <?= htmlspecialchars(addslashes($u['name'])) ?>?\n\nO código atual será invalidado.')">
+            <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+            <input type="hidden" name="action" value="regen_code">
+            <input type="hidden" name="uid" value="<?= $u['id'] ?>">
+            <button type="submit" class="btn btn-secondary" style="padding:5px 10px;font-size:11px;color:var(--warning);border-color:rgba(245,158,11,.35)" title="Gerar novo código">🔄</button>
+          </form>
+          <?php endif; ?>
           <?php if (!$isSelf): ?>
-          <form method="POST" onsubmit="return confirm('Excluir <?= htmlspecialchars(addslashes($u['name'])) ?>?')">
+          <form method="POST" style="display:inline" onsubmit="return confirm('Excluir <?= htmlspecialchars(addslashes($u['name'])) ?>?')">
             <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
             <input type="hidden" name="action" value="delete">
             <input type="hidden" name="uid" value="<?= $u['id'] ?>">
@@ -463,6 +571,23 @@ function togglePass() {
   b.textContent = i.type === 'password' ? '👁️' : '🙈';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeEdit(); closeCredit(); } });
+
+function copyCode(btn, code) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(code).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '✅';
+      setTimeout(() => btn.textContent = orig, 1500);
+    }).catch(() => fbCopyCode(code, btn));
+  } else fbCopyCode(code, btn);
+}
+function fbCopyCode(code, btn) {
+  const ta = document.createElement('textarea');
+  ta.value = code; ta.style.cssText = 'position:fixed;top:-9999px';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); const o = btn.textContent; btn.textContent = '✅'; setTimeout(() => btn.textContent = o, 1500); } catch(e) {}
+  document.body.removeChild(ta);
+}
 
 <?php if ($error && ($_POST['action'] ?? '') === 'edit_user'): ?>
 document.addEventListener('DOMContentLoaded', () => openEdit({

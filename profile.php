@@ -8,11 +8,16 @@ $pageTitle = 'Meu Perfil';
 $message   = '';
 $error     = '';
 
+$isAnon = !empty($user['is_anonymous']);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Token inválido.';
     } else {
         $action = $_POST['action'] ?? 'profile';
+
+        // Usuários anônimos não podem alterar perfil nem senha
+        if ($isAnon) { $error = 'Usuário anônimo não possui perfil editável.'; $action = '__skip__'; }
 
         if ($action === 'profile') {
             $name  = trim($_POST['name'] ?? '');
@@ -107,6 +112,7 @@ require __DIR__ . '/includes/header.php';
     </div>
   </div>
 
+  <?php if (!$isAnon): ?>
   <!-- Stats -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
     <div class="stat-card" style="text-align:center;padding:14px">
@@ -122,9 +128,10 @@ require __DIR__ . '/includes/header.php';
       <div class="stat-label" style="font-size:11px">Arquivos</div>
     </div>
   </div>
+  <?php endif; ?>
 
   <!-- Recent activity -->
-  <?php if ($recentPosts): ?>
+  <?php if (!$isAnon && $recentPosts): ?>
   <div class="card" style="overflow:hidden">
     <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700">Meus posts recentes</div>
     <?php foreach ($recentPosts as $rp): ?>
@@ -153,7 +160,74 @@ require __DIR__ . '/includes/header.php';
   <?php if ($message): ?><div class="alert alert-success"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><?= htmlspecialchars($message) ?></div><?php endif; ?>
   <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
 
-  <!-- Profile info -->
+  <?php if ($isAnon): ?>
+  <!-- ═══ Perfil ANÔNIMO — só código de acesso e sair ═══ -->
+  <div class="card" style="padding:28px;border:1px solid rgba(124,106,255,.35);background:linear-gradient(135deg,rgba(124,106,255,.08),rgba(255,106,158,.05))">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="font-family:'Roboto',sans-serif;font-size:16px;font-weight:700">🔐 Seu código de acesso</div>
+      <span style="background:rgba(255,106,158,.18);color:var(--accent2);font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px">🕶️ Conta anônima</span>
+    </div>
+    <p style="font-size:13px;color:var(--muted2);margin-bottom:18px;line-height:1.55">
+      Este é o único dado necessário para entrar novamente na sua conta. Guarde com segurança — ele <b>não pode ser recuperado</b> se for perdido.
+    </p>
+
+    <?php if (!empty($user['access_code'])): ?>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+      <div id="acc-code" style="flex:1;font-family:'Courier New',monospace;font-size:22px;font-weight:800;letter-spacing:3px;color:var(--text);background:var(--surface2);border:1px solid var(--border);padding:16px;border-radius:10px;text-align:center">
+        <?= htmlspecialchars($user['access_code']) ?>
+      </div>
+      <button type="button" id="btn-acc-copy" onclick="copyAccCode()" class="btn btn-primary" style="padding:16px 18px;white-space:nowrap">📋 Copiar</button>
+    </div>
+    <?php else: ?>
+    <div class="alert alert-danger">Código não encontrado. Contate o administrador.</div>
+    <?php endif; ?>
+
+    <?php if (!empty($user['expires_at'])):
+      $expTs = strtotime($user['expires_at']);
+      $days  = ceil(($expTs - time()) / 86400);
+      $expired = $expTs < time();
+    ?>
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface2);border-radius:9px;font-size:13px">
+      <?php if ($expired): ?>
+        <span style="color:var(--danger);font-weight:700">⚠ Acesso expirado</span>
+        <a href="<?= SITE_URL ?>/renovar" class="btn btn-primary" style="margin-left:auto;padding:6px 14px;font-size:12px">Renovar</a>
+      <?php else: ?>
+        <span style="color:var(--muted2)">Acesso válido até</span>
+        <b style="color:var(--text)"><?= date('d/m/Y', $expTs) ?></b>
+        <span style="color:<?= $days<=3?'var(--warning)':'var(--success)' ?>">· <?= $days ?> dia<?= $days!=1?'s':'' ?> restante<?= $days!=1?'s':'' ?></span>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
+  </div>
+
+  <!-- Sair -->
+  <div class="card" style="padding:20px;display:flex;align-items:center;gap:14px">
+    <div style="flex:1">
+      <div style="font-family:'Roboto',sans-serif;font-size:14px;font-weight:700">Encerrar sessão neste dispositivo</div>
+      <div style="font-size:12px;color:var(--muted)">Você pode voltar a qualquer momento usando seu código de acesso.</div>
+    </div>
+    <a href="<?= SITE_URL ?>/logout" class="btn btn-danger">Sair</a>
+  </div>
+
+  <script>
+  function copyAccCode() {
+    var el = document.getElementById('acc-code');
+    var btn = document.getElementById('btn-acc-copy');
+    if (!el) return;
+    var text = el.textContent.trim();
+    function done(){ if(btn){ var o=btn.textContent; btn.textContent='✅ Copiado!'; setTimeout(function(){ btn.textContent=o; },1800); } }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(function(){
+        var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');done();}catch(e){} document.body.removeChild(ta);
+      });
+    } else {
+      var ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;top:-9999px'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');done();}catch(e){} document.body.removeChild(ta);
+    }
+  }
+  </script>
+
+  <?php else: ?>
+  <!-- ═══ Perfil NORMAL — edita dados e senha ═══ -->
   <div class="card" style="padding:24px">
     <div style="font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;margin-bottom:20px">Informações do perfil</div>
     <form method="POST">
@@ -176,7 +250,6 @@ require __DIR__ . '/includes/header.php';
     </form>
   </div>
 
-  <!-- Change password -->
   <div class="card" style="padding:24px">
     <div style="font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;margin-bottom:20px">Alterar senha</div>
     <form method="POST">
@@ -200,12 +273,12 @@ require __DIR__ . '/includes/header.php';
     </form>
   </div>
 
-  <!-- Danger zone -->
   <div class="card" style="padding:24px;border-color:rgba(255,77,106,.2)">
     <div style="font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;margin-bottom:8px;color:var(--danger)">Zona de perigo</div>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Ações irreversíveis. Prossiga com cautela.</p>
     <a href="<?= SITE_URL ?>/logout" class="btn btn-danger">Encerrar sessão</a>
   </div>
+  <?php endif; ?>
 </div>
 
 </div>

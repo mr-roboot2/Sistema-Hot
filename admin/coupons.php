@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ??
 
     if ($action === 'create') {
         $code  = strtoupper(trim($_POST['code'] ?? ''));
-        $type  = in_array($_POST['type']??'', ['percent','fixed']) ? $_POST['type'] : 'percent';
+        $type  = in_array($_POST['type'] ?? '', ['percent','fixed'], true) ? $_POST['type'] : 'percent';
         $value = (float)($_POST['value'] ?? 0);
         $max   = (int)($_POST['max_uses'] ?? 0) ?: null;
         $until = $_POST['valid_until'] ? date('Y-m-d H:i:s', strtotime($_POST['valid_until'])) : null;
@@ -91,7 +91,7 @@ require __DIR__ . '/../includes/header.php';
     </thead>
     <tbody>
     <?php foreach($coupons as $cp):
-      $expired = $cp['valid_until'] && strtotime($cp['valid_until']) < time();
+      $expired = !empty($cp['valid_until']) && ($cpTs = strtotime($cp['valid_until'])) !== false && $cpTs < time();
       $exhausted = $cp['max_uses'] && $cp['used_count'] >= $cp['max_uses'];
     ?>
     <tr style="border-bottom:1px solid var(--border)">

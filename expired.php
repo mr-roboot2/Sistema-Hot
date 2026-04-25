@@ -15,11 +15,19 @@ if (isset($_GET['goto']) && $_GET['goto'] === 'carteira' && !empty($_SESSION['ex
 $siteName   = getSetting('site_name', SITE_NAME);
 $hasSession = !empty($_SESSION['expired_user_id']);
 
-// Verifica planos com preço
+// Verifica planos com preço + identifica se é usuário anônimo (pra lembrar o código)
 $hasPlans = false;
+$anonCode = null;
 try {
     $db = getDB();
     $hasPlans = (bool)$db->query('SELECT COUNT(*) FROM plans WHERE active=1 AND price > 0')->fetchColumn();
+    if ($hasSession) {
+        $u = $db->prepare('SELECT access_code, is_anonymous FROM users WHERE id=?');
+        $u->execute([(int)$_SESSION['expired_user_id']]); $u = $u->fetch();
+        if ($u && !empty($u['is_anonymous']) && !empty($u['access_code'])) {
+            $anonCode = $u['access_code'];
+        }
+    }
 } catch(Exception $e) {}
 ?>
 <!DOCTYPE html>
@@ -47,7 +55,15 @@ trackingCaptureGoogleClick();
 
     <h1 id="title">Seu acesso expirou</h1>
     <p class="sub">Seu plano no <strong style="color:var(--text)"><?= htmlspecialchars($siteName) ?></strong> chegou ao fim.</p>
-    <p class="sub" id="sub2">Entre em contato com o administrador para renovar.</p>
+    <p class="sub" id="sub2">Renove abaixo para continuar acessando — seu código de acesso permanece o mesmo.</p>
+
+    <?php if ($anonCode): ?>
+    <div style="background:rgba(124,106,255,.08);border:1px dashed rgba(124,106,255,.45);border-radius:10px;padding:12px 14px;margin:14px 0;font-size:12px;color:var(--muted2);text-align:left">
+      <div style="color:var(--accent);font-weight:700;margin-bottom:4px">🔐 Seu código de acesso</div>
+      <div style="font-family:'Courier New',monospace;font-size:16px;font-weight:800;color:var(--text);letter-spacing:2px;text-align:center;padding:6px 0"><?= htmlspecialchars($anonCode) ?></div>
+      <div style="font-size:11px;line-height:1.5;margin-top:4px">Após renovar, continue usando este mesmo código para entrar.</div>
+    </div>
+    <?php endif; ?>
 
     <hr class="divider">
 

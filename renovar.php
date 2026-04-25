@@ -68,19 +68,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $useCredit    = isset($_POST['use_credit']) && $_POST['use_credit'] === '1';
             $creditUsed   = 0;
 
-            // Valida cupom se fornecido
+            // Valida e reserva o cupom dentro de uma transação (previne burlar max_uses em requests simultâneos)
+            $couponReservedId = 0;
             if ($couponCode) {
                 $now = date('Y-m-d H:i:s');
-                $cp  = $db->prepare('SELECT * FROM coupons WHERE code=? AND active=1 AND (valid_until IS NULL OR valid_until > ?) AND (max_uses IS NULL OR used_count < max_uses)');
-                $cp->execute([$couponCode, $now]); $cp = $cp->fetch();
-                if (!$cp) {
-                    $error = 'Cupom inválido, expirado ou esgotado.';
-                } else {
-                    $discount = $cp['type'] === 'percent'
-                        ? round($finalPrice * $cp['value'] / 100, 2)
-                        : min((float)$cp['value'], $finalPrice);
-                    $finalPrice = max(0.01, $finalPrice - $discount);
-                    $couponInfo = ['code'=>$cp['code'],'discount'=>$discount,'type'=>$cp['type'],'value'=>$cp['value'],'id'=>$cp['id']];
+                try {
+                    $db->beginTransaction();
+                    $cp = $db->prepare('SELECT * FROM coupons WHERE code=? AND active=1 AND (valid_until IS NULL OR valid_until > ?) AND (max_uses IS NULL OR used_count < max_uses) FOR UPDATE');
+                    $cp->execute([$couponCode, $now]);
+                    $cp = $cp->fetch();
+                    if (!$cp) {
+                        $error = 'Cupom inválido, expirado ou esgotado.';
+                        $db->rollBack();
+                    } else {
+                        // Incrementa imediatamente — se PIX/ativação falhar, fazemos rollback pontual decrementando.
+                        $db->prepare('UPDATE coupons SET used_count=used_count+1 WHERE id=?')->execute([$cp['id']]);
+                        $db->commit();
+                        $couponReservedId = (int)$cp['id'];
+                        $discount = $cp['type'] === 'percent'
+                            ? round($finalPrice * $cp['value'] / 100, 2)
+                            : min((float)$cp['value'], $finalPrice);
+                        $finalPrice = max(0.01, $finalPrice - $discount);
+                        $couponInfo = ['code'=>$cp['code'],'discount'=>$discount,'type'=>$cp['type'],'value'=>$cp['value'],'id'=>$cp['id']];
+                    }
+                } catch (Exception $e) {
+                    if ($db->inTransaction()) $db->rollBack();
+                    $error = 'Erro ao validar cupom.';
                 }
             }
 
@@ -127,9 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            ->execute([$txId, 'Pagamento completo com créditos — plano '.$plan['name'], $creditReservedId]);
                     }
                     affiliateOnPurchase((int)$userId, $txId, $creditUsed);
-                    if ($couponInfo) {
-                        $db->prepare('UPDATE coupons SET used_count=used_count+1 WHERE id=?')->execute([$couponInfo['id']]);
-                    }
+                    // Cupom já foi incrementado acima dentro da transação — nada a fazer aqui.
                     // Faz login completo se era pendente
                     if (!empty($_SESSION['pending_user_id'])) {
                         $u = $db->prepare('SELECT id,name,role FROM users WHERE id=?');
@@ -148,8 +159,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result = createPixCharge((int)$userId, $plan['id'], $finalPrice);
                 if ($result['ok']) {
                     $pixData = $result; $selPlan = $plan;
-                    if ($couponInfo) {
-                        $db->prepare('UPDATE coupons SET used_count=used_count+1 WHERE id=?')->execute([$couponInfo['id']]);
+                    // Se o PIX foi reusado (usuário recarregou a página), devolve o incremento do cupom
+                    // — o cupom original da tx original já foi contado.
+                    if (!empty($result['reused']) && !empty($couponReservedId)) {
+                        $db->prepare('UPDATE coupons SET used_count=GREATEST(0, used_count-1) WHERE id=?')
+                           ->execute([$couponReservedId]);
                     }
                     if ($creditUsed > 0 && $affId && !empty($creditReservedId)) {
                         $db->prepare("UPDATE affiliate_credits_used SET transaction_id=?, note=? WHERE id=?")
@@ -161,6 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!empty($creditReservedId)) {
                         $db->prepare('DELETE FROM affiliate_credits_used WHERE id=? AND note="_reservado_"')
                            ->execute([$creditReservedId]);
+                    }
+                    // Devolve uso do cupom se a cobrança falhou
+                    if (!empty($couponReservedId)) {
+                        $db->prepare('UPDATE coupons SET used_count=GREATEST(0, used_count-1) WHERE id=?')
+                           ->execute([$couponReservedId]);
                     }
                 }
             }

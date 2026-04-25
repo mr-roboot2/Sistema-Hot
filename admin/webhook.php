@@ -66,13 +66,15 @@ if (isset($_POST['retry_webhook']) && csrf_verify($_POST['csrf_token'] ?? '')) {
             $secret = getSetting('webhook_secret', '');
             $headers = ['Content-Type: application/json'];
             if ($secret) $headers[] = 'X-Webhook-Token: ' . $secret;
+            $verifySsl = strpos(SITE_URL, 'localhost') === false && strpos(SITE_URL, '127.0.0.1') === false;
             curl_setopt_array($ch, [
                 CURLOPT_POST           => true,
                 CURLOPT_POSTFIELDS     => $log['payload'],
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_HTTPHEADER     => $headers,
                 CURLOPT_TIMEOUT        => 15,
-                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
             ]);
             $result = curl_exec($ch);
             $code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -109,6 +111,7 @@ if (isset($_POST['test_webhook']) && csrf_verify($_POST['csrf_token'] ?? '')) {
     $webhookUrl = SITE_URL . '/webhook.php';
     $secret     = getSetting('webhook_secret','');
     $ch = curl_init($webhookUrl);
+    $verifySsl = strpos(SITE_URL, 'localhost') === false && strpos(SITE_URL, '127.0.0.1') === false;
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => json_encode($testPayload),
@@ -118,7 +121,8 @@ if (isset($_POST['test_webhook']) && csrf_verify($_POST['csrf_token'] ?? '')) {
             $secret ? "X-Webhook-Secret: {$secret}" : 'X-Test: 1',
         ],
         CURLOPT_TIMEOUT        => 10,
-        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYPEER => $verifySsl,
+        CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
     ]);
     $resp    = curl_exec($ch);
     $code    = curl_getinfo($ch, CURLINFO_HTTP_CODE);

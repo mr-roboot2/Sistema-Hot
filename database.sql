@@ -139,6 +139,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_id       INT DEFAULT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at    DATETIME DEFAULT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS expired_notified TINYINT(1) DEFAULT 0;
 
+-- Códigos de acesso pré-pagos (admin/acessos.php)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_code    VARCHAR(20) DEFAULT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_anonymous   TINYINT(1)  DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_login_at DATETIME    DEFAULT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by     INT         DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_access_code ON users (access_code);
+
 -- ── Webhook ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS webhook_logs (
     id           INT AUTO_INCREMENT PRIMARY KEY,

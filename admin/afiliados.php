@@ -48,23 +48,36 @@ if (isset($_GET['saved'])) $message = '✅ Alteração salva.';
 // ── Dados ─────────────────────────────────────────────────────
 $tab = $_GET['tab'] ?? 'afiliados';
 
-// Lista afiliados
+// Lista afiliados — subqueries agregadas em derived tables (evita N+1 correlacionado)
 $affiliates = $db->query("
     SELECT a.*, u.name AS user_name, u.phone AS user_phone,
-           COUNT(DISTINCT r.id) AS total_clicks,
-           COUNT(DISTINCT CASE WHEN r.status='registered' THEN r.id END) AS total_regs,
-           COUNT(DISTINCT CASE WHEN r.status='converted'  THEN r.id END) AS total_conv,
-           COALESCE(SUM(CASE WHEN r.status='converted' THEN r.commission_earned END), 0) AS total_earned,
-           /* Saldo = comissões ganhas + créditos adicionados - créditos usados */
+           COALESCE(rs.total_clicks, 0) AS total_clicks,
+           COALESCE(rs.total_regs,   0) AS total_regs,
+           COALESCE(rs.total_conv,   0) AS total_conv,
+           COALESCE(rs.total_earned, 0) AS total_earned,
            GREATEST(0, ROUND(
-               COALESCE(SUM(CASE WHEN r.status='converted' THEN r.commission_earned END), 0)
-               + COALESCE((SELECT SUM(ca.amount) FROM affiliate_credits_added ca WHERE ca.affiliate_id=a.id), 0)
-               - COALESCE((SELECT SUM(cu.amount) FROM affiliate_credits_used cu WHERE cu.affiliate_id=a.id), 0)
+               COALESCE(rs.total_earned, 0)
+               + COALESCE(ca.total_added, 0)
+               - COALESCE(cu.total_used,  0)
            , 2)) AS balance_cached
     FROM affiliates a
     JOIN users u ON u.id = a.user_id
-    LEFT JOIN referrals r ON r.affiliate_id = a.id
-    GROUP BY a.id
+    LEFT JOIN (
+        SELECT affiliate_id,
+               COUNT(*) AS total_clicks,
+               SUM(status='registered') AS total_regs,
+               SUM(status='converted')  AS total_conv,
+               COALESCE(SUM(CASE WHEN status='converted' THEN commission_earned END), 0) AS total_earned
+        FROM referrals GROUP BY affiliate_id
+    ) rs ON rs.affiliate_id = a.id
+    LEFT JOIN (
+        SELECT affiliate_id, SUM(amount) AS total_added
+        FROM affiliate_credits_added GROUP BY affiliate_id
+    ) ca ON ca.affiliate_id = a.id
+    LEFT JOIN (
+        SELECT affiliate_id, SUM(amount) AS total_used
+        FROM affiliate_credits_used GROUP BY affiliate_id
+    ) cu ON cu.affiliate_id = a.id
     ORDER BY total_earned DESC, a.created_at DESC
 ")->fetchAll();
 
@@ -93,11 +106,12 @@ $creditsUsed = $db->query("
     LIMIT 100
 ")->fetchAll() ?: [];
 
-// Usuários sem afiliado para o select
+// Usuários sem afiliado (LEFT JOIN em vez de NOT IN — melhor com índice)
 $users = $db->query("
-    SELECT u.id, u.name FROM users u
-    WHERE u.role != 'admin'
-    AND u.id NOT IN (SELECT user_id FROM affiliates)
+    SELECT u.id, u.name
+    FROM users u
+    LEFT JOIN affiliates a ON a.user_id = u.id
+    WHERE u.role != 'admin' AND a.id IS NULL
     ORDER BY u.name
 ")->fetchAll();
 

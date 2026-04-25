@@ -272,7 +272,7 @@ function expiryBadge(array $u): string {
           ✏️ Editar
         </button>
         <!-- Revogar -->
-        <?php $jaExpirado = !empty($u['expires_at']) && strtotime($u['expires_at']) < time(); ?>
+        <?php $jaExpirado = !empty($u['expires_at']) && ($uTs = strtotime($u['expires_at'])) !== false && $uTs < time(); ?>
         <?php if (!$jaExpirado && !empty($u['expires_at'])): ?>
         <form method="POST" style="display:inline"
               onsubmit="return confirm('Revogar acesso de <?= htmlspecialchars(addslashes($u['name'])) ?>? O usuário será bloqueado imediatamente.')">

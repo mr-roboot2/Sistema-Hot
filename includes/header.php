@@ -349,6 +349,12 @@ select.form-control{cursor:pointer}
 </head>
 <body>
 <?php /* trackingBodyCode removido — sem snippet em todas as páginas */ ?>
+<?php if (!empty($_SESSION['impersonator_user_id'])): ?>
+<div style="background:linear-gradient(90deg,#ff6a9e,#7c6aff);color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:13px;font-weight:600;position:sticky;top:0;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,.25)">
+  <span>👤 Você está acessando como <b><?= htmlspecialchars($user['name'] ?? '?') ?></b> — admin original: <?= htmlspecialchars($_SESSION['impersonator_user_name'] ?? '') ?></span>
+  <a href="<?= SITE_URL ?>/stop-impersonate.php" style="background:#fff;color:#7c6aff;padding:5px 14px;border-radius:20px;text-decoration:none;font-weight:700;font-size:12px">↩ Voltar ao admin</a>
+</div>
+<?php endif; ?>
 <div class="layout">
 <!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
@@ -452,6 +458,10 @@ select.form-control{cursor:pointer}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
       Cupons
     </a>
+    <a href="<?= SITE_URL ?>/admin/acessos.php" class="nav-item <?= strpos($p,'acessos')!==false?'active':'' ?>">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Códigos
+    </a>
     <a href="<?= SITE_URL ?>/admin/mensagens.php" class="nav-item <?= strpos($p,'admin/mensagens')!==false?'active':'' ?>">
       <?php
       try {
@@ -488,13 +498,14 @@ select.form-control{cursor:pointer}
     <?php endforeach; ?>
   </div>
 
+  <?php if (!empty($user)): ?>
   <div class="sidebar-user">
     <a href="<?= SITE_URL ?>/profile" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-decoration:none">
       <div class="user-avatar" style="<?= !empty($user['plan_color']) ? 'background:linear-gradient(135deg,'.$user['plan_color'].','.$user['plan_color'].'99)' : '' ?>">
-        <?= strtoupper(mb_substr($user['name'], 0, 1)) ?>
+        <?= strtoupper(mb_substr($user['name'] ?? '?', 0, 1)) ?>
       </div>
       <div class="user-info" style="min-width:0">
-        <div class="user-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= htmlspecialchars($user['name']) ?></div>
+        <div class="user-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><?= htmlspecialchars($user['name'] ?? '') ?></div>
         <div class="user-role" style="display:flex;align-items:center;gap:5px;flex-wrap:nowrap">
           <?php if (!empty($user['plan_name'])): ?>
             <span style="color:<?= htmlspecialchars($user['plan_color']??'var(--accent)') ?>;font-size:10px;font-weight:700;white-space:nowrap"><?= htmlspecialchars($user['plan_name']) ?></span>
@@ -505,7 +516,7 @@ select.form-control{cursor:pointer}
             </span>
             <?php endif; ?>
           <?php else: ?>
-            <span style="font-size:10px;color:var(--muted)"><?= ucfirst($user['role']) ?></span>
+            <span style="font-size:10px;color:var(--muted)"><?= ucfirst($user['role'] ?? 'user') ?></span>
           <?php endif; ?>
         </div>
       </div>
@@ -514,6 +525,7 @@ select.form-control{cursor:pointer}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </a>
   </div>
+  <?php endif; ?>
 </aside>
 <div class="sidebar-overlay" id="overlay" onclick="toggleSidebar()"></div>
 

@@ -12,32 +12,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Token inválido.';
     } else {
         $name  = trim($_POST['name'] ?? '');
-        $phone = preg_replace('/\D/', '', $_POST['phone'] ?? '');
+        $email = strtolower(trim($_POST['email'] ?? ''));
         $pass  = $_POST['password'] ?? '';
         $pass2 = $_POST['password2'] ?? '';
 
-        if (!$name || !$phone || !$pass)       $error = 'Preencha todos os campos.';
-        elseif (!validateBrazilianPhone($phone)) $error = 'Telefone inválido. Use o formato (DDD) + número, ex: (11) 99999-9999.';
-        elseif (strlen($pass) < 6)              $error = 'Senha deve ter no mínimo 6 caracteres.';
-        elseif ($pass !== $pass2)               $error = 'As senhas não coincidem.';
+        if (!$name || !$email || !$pass)         $error = 'Preencha todos os campos.';
+        elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $error = 'E-mail inválido.';
+        elseif (strlen($pass) < 6)               $error = 'Senha deve ter no mínimo 6 caracteres.';
+        elseif ($pass !== $pass2)                $error = 'As senhas não coincidem.';
         else {
             $db = getDB();
-            // Garante coluna phone
-            try { $db->exec("ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT NULL"); } catch(Exception $e) {}
 
-            // Gera e-mail único a partir do telefone
-            $email = 'user_' . $phone . '@local.cms';
-
-            $chk = $db->prepare('SELECT id FROM users WHERE phone=?');
-            $chk->execute([$phone]);
-            if ($chk->fetch()) $error = 'Este telefone já está cadastrado.';
+            $chk = $db->prepare('SELECT id FROM users WHERE email=?');
+            $chk->execute([$email]);
+            if ($chk->fetch()) $error = 'Este e-mail já está cadastrado.';
             else {
-                $db->prepare('INSERT INTO users (name, email, phone, password, role) VALUES (?,?,?,?,?)')
-                   ->execute([$name, $email, $phone, password_hash($pass, PASSWORD_DEFAULT), 'viewer']);
+                $db->prepare('INSERT INTO users (name, email, password, role) VALUES (?,?,?,?)')
+                   ->execute([$name, $email, password_hash($pass, PASSWORD_DEFAULT), 'viewer']);
                 $newId  = (int)$db->lastInsertId();
                 $planId = (int)($_GET['plan'] ?? 0);
                 // Dispara Lead server-side (Meta Conversions API)
-                trackLead(['name' => $name, 'email' => $email, 'phone' => $phone]);
+                trackLead(['name' => $name, 'email' => $email]);
                 // Registra indicação de afiliado
                 if (!function_exists('affiliateOnRegister')) require_once __DIR__ . '/includes/affiliate.php';
                 affiliateOnRegister($newId);
@@ -107,13 +102,10 @@ trackingCaptureGoogleClick();
         <input type="text" name="name" required placeholder="Seu nome completo" value="<?= htmlspecialchars($_POST['name']??'') ?>" autofocus>
       </div>
       <div class="field">
-        <label>Telefone / WhatsApp</label>
-        <div class="phone-wrap">
-          <span class="phone-prefix">🇧🇷</span>
-          <input type="tel" name="phone" required placeholder="(11) 99999-9999"
-                 value="<?= htmlspecialchars($_POST['phone']??'') ?>"
-                 oninput="formatPhone(this)">
-        </div>
+        <label>E-mail</label>
+        <input type="email" name="email" required placeholder="voce@exemplo.com"
+               value="<?= htmlspecialchars($_POST['email']??'') ?>"
+               autocomplete="email">
       </div>
       <div class="field">
         <label>Senha</label>
@@ -128,24 +120,4 @@ trackingCaptureGoogleClick();
     <div class="links">Já tem conta? <a href="<?= SITE_URL ?>/login">Entrar</a></div>
   </div>
 </div>
-<script>
-function formatPhone(el) {
-  let v = el.value.replace(/\D/g,'');
-  if (v.length <= 11) {
-    v = v.replace(/^(\d{2})(\d)/,'($1) $2');
-    v = v.replace(/(\d{4,5})(\d{4})$/,'$1-$2');
-  }
-  el.value = v;
-}
-</script>
-<script>
-document.querySelectorAll('input[name=phone]').forEach(function(inp){
-  inp.addEventListener('input',function(){
-    var v=this.value.replace(/\D/g,'').slice(0,11);
-    if(v.length<=10) v=v.replace(/^(\d{2})(\d{4})(\d{0,4})/,'($1) $2-$3');
-    else v=v.replace(/^(\d{2})(\d{5})(\d{0,4})/,'($1) $2-$3');
-    this.value=v.replace(/-$/,'');
-  });
-});
-</script>
 </body></html>

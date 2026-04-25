@@ -27,10 +27,11 @@ if (!$f || !file_exists($path) || !is_file($path)) {
     http_response_code(404); die('Arquivo não encontrado.');
 }
 
-// Garante que está dentro da pasta uploads
+// Garante que está dentro da pasta uploads (prefixo precisa terminar em separador
+// pra evitar bypass tipo /uploads_old/ quando o alvo é /uploads/)
 $real     = realpath($path);
 $uploadR  = realpath(UPLOAD_DIR);
-if (!$real || strpos($real, $uploadR) !== 0) {
+if (!$real || !$uploadR || strpos($real, rtrim($uploadR, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR) !== 0) {
     http_response_code(403); die('Acesso negado.');
 }
 

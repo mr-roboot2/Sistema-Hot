@@ -27,16 +27,29 @@ if (!$data || !is_array($data)) {
     exit;
 }
 
-// ── Verificação de segurança (secret token) ───
+// ── Verificação de segurança ───
+// Aceita 2 modos (não-exclusivos):
+//   1) HMAC-SHA256 do body — header X-Webhook-Signature (preferido, prova integridade)
+//   2) Shared secret — header X-Webhook-Secret / Authorization: Bearer … (legado)
 $secret = getSetting('webhook_secret', '');
 if ($secret !== '') {
-    $headerToken = $_SERVER['HTTP_X_WEBHOOK_SECRET']
-        ?? $_SERVER['HTTP_AUTHORIZATION']
-        ?? '';
-    // Remove "Bearer " se existir
+    $sigHeader   = trim($_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? '');
+    $headerToken = $_SERVER['HTTP_X_WEBHOOK_SECRET'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
     $headerToken = preg_replace('/^Bearer\s+/i', '', trim($headerToken));
-    if (!hash_equals($secret, $headerToken)) {
-        logWebhook($data['event'] ?? 'unknown', null, null, null, null, null, 'error', 'Token inválido', $rawBody);
+
+    // Normaliza prefixos comuns (sha256=...)
+    $sigHeader = preg_replace('/^sha256=/i', '', $sigHeader);
+
+    $ok = false;
+    if ($sigHeader !== '') {
+        $expected = hash_hmac('sha256', $rawBody, $secret);
+        $ok = hash_equals($expected, $sigHeader);
+    } elseif ($headerToken !== '') {
+        $ok = hash_equals($secret, $headerToken);
+    }
+
+    if (!$ok) {
+        logWebhook($data['event'] ?? 'unknown', null, null, null, null, null, 'error', 'Token/assinatura inválido', $rawBody);
         http_response_code(401);
         echo json_encode(['error' => 'Unauthorized']);
         exit;
@@ -44,17 +57,19 @@ if ($secret !== '') {
 }
 
 // ── Extrai campos do payload ──────────────────
-$event       = $data['event']                         ?? '';
-$telegramId  = (string)($data['customer']['telegram_id'] ?? '');
-$firstName   = trim($data['customer']['first_name']   ?? '');
-$lastName    = trim($data['customer']['last_name']    ?? '');
-$username    = trim($data['customer']['username']     ?? '');
-$externalId  = $data['transaction']['id']             ?? ($data['transaction']['external_id'] ?? '');
-$planName    = $data['transaction']['plan_name']       ?? '';
-$planId      = $data['transaction']['plan_id']         ?? '';
-$amount      = isset($data['transaction']['amount']) ? (float)$data['transaction']['amount'] : null;
-$gateway     = $data['transaction']['gateway']         ?? '';
-$status      = $data['transaction']['status']          ?? '';
+$customer    = is_array($data['customer'] ?? null)    ? $data['customer']    : [];
+$transaction = is_array($data['transaction'] ?? null) ? $data['transaction'] : [];
+$event       = $data['event']                 ?? '';
+$telegramId  = (string)($customer['telegram_id'] ?? '');
+$firstName   = trim((string)($customer['first_name'] ?? ''));
+$lastName    = trim((string)($customer['last_name']  ?? ''));
+$username    = trim((string)($customer['username']   ?? ''));
+$externalId  = $transaction['id']             ?? ($transaction['external_id'] ?? '');
+$planName    = $transaction['plan_name']       ?? '';
+$planId      = $transaction['plan_id']         ?? '';
+$amount      = isset($transaction['amount']) ? (float)$transaction['amount'] : null;
+$gateway     = $transaction['gateway']         ?? '';
+$status      = $transaction['status']          ?? '';
 
 // ── Só processa pagamentos aprovados ─────────
 $approvedEvents = ['payment_approved', 'purchase_approved', 'payment_confirmed', 'order_paid'];
@@ -126,7 +141,7 @@ $planDays  = $plan ? (int)$plan['duration_days'] : 30;
 $expires   = date('Y-m-d H:i:s', time() + $planDays * 86400);
 
 // ── Verifica se usuário já existe (telegram_id) ──
-$existing = $db->prepare('SELECT id,name,email,phone,role,plan_id,expires_at FROM users WHERE telegram_id=? LIMIT 1');
+$existing = $db->prepare('SELECT id,name,email,phone,role,plan_id,expires_at,telegram_id,telegram_username FROM users WHERE telegram_id=? LIMIT 1');
 $existing->execute([$telegramId]);
 $user = $existing->fetch();
 
@@ -175,9 +190,16 @@ if ($user) {
     $newId = (int)$db->lastInsertId();
 
     // Busca usuário criado
-    $user = $db->prepare('SELECT id,name,email,phone,role,plan_id,expires_at FROM users WHERE id=?');
-    $user->execute([$newId]);
-    $user = $user->fetch();
+    $stmtUser = $db->prepare('SELECT id,name,email,phone,role,plan_id,expires_at,telegram_id,telegram_username FROM users WHERE id=?');
+    $stmtUser->execute([$newId]);
+    $user = $stmtUser->fetch();
+
+    if (!$user) {
+        logWebhook($event, $telegramId, $externalId, $planName, $amount, $gateway, 'error', 'Falha ao buscar usuário criado', $rawBody, $newId);
+        http_response_code(500);
+        echo json_encode(['error' => 'Failed to load created user']);
+        exit;
+    }
 
     $logUserId = $newId;
     $created   = true;
@@ -187,20 +209,26 @@ if ($user) {
         $site    = getSetting('site_name', SITE_NAME);
         $siteUrl = SITE_URL;
         $expStr  = date('d/m/Y', strtotime($expires));
+        // Escape de todos os campos vindos do payload (Telegram first_name/last_name podem conter HTML)
+        $eFullName  = htmlspecialchars($fullName,  ENT_QUOTES, 'UTF-8');
+        $eEmail     = htmlspecialchars($emailFinal, ENT_QUOTES, 'UTF-8');
+        $ePassword  = htmlspecialchars($plainPassword, ENT_QUOTES, 'UTF-8');
+        $eSite      = htmlspecialchars($site,      ENT_QUOTES, 'UTF-8');
+        $ePlanName  = $plan ? htmlspecialchars($plan['name'], ENT_QUOTES, 'UTF-8') : '';
         $html = "
         <div style='font-family:sans-serif;max-width:520px;margin:0 auto;background:#0a0a0f;color:#e8e8f0;padding:40px;border-radius:16px'>
           <h2 style='color:#7c6aff;margin-bottom:8px'>Acesso liberado! 🎉</h2>
-          <p style='color:#9090a8;margin-bottom:20px'>Olá, <b style='color:#e8e8f0'>{$fullName}</b>! Seu pagamento foi confirmado e sua conta no <b>{$site}</b> foi criada.</p>
+          <p style='color:#9090a8;margin-bottom:20px'>Olá, <b style='color:#e8e8f0'>{$eFullName}</b>! Seu pagamento foi confirmado e sua conta no <b>{$eSite}</b> foi criada.</p>
           <div style='background:#13131a;border:1px solid #2a2a3a;border-radius:12px;padding:20px;margin-bottom:24px'>
-            <div style='margin-bottom:10px'><span style='color:#6b6b80;font-size:12px'>E-MAIL DE ACESSO</span><br><b style='font-size:16px'>{$emailFinal}</b></div>
-            <div style='margin-bottom:10px'><span style='color:#6b6b80;font-size:12px'>SENHA</span><br><b style='font-size:20px;letter-spacing:2px;color:#7c6aff'>{$plainPassword}</b></div>
-            <div><span style='color:#6b6b80;font-size:12px'>ACESSO VÁLIDO ATÉ</span><br><b>{$expStr}</b>" . ($plan ? " — {$plan['name']}" : '') . "</div>
+            <div style='margin-bottom:10px'><span style='color:#6b6b80;font-size:12px'>E-MAIL DE ACESSO</span><br><b style='font-size:16px'>{$eEmail}</b></div>
+            <div style='margin-bottom:10px'><span style='color:#6b6b80;font-size:12px'>SENHA</span><br><b style='font-size:20px;letter-spacing:2px;color:#7c6aff'>{$ePassword}</b></div>
+            <div><span style='color:#6b6b80;font-size:12px'>ACESSO VÁLIDO ATÉ</span><br><b>{$expStr}</b>" . ($ePlanName ? " — {$ePlanName}" : '') . "</div>
           </div>
           <a href='{$siteUrl}/login' style='display:inline-block;padding:13px 28px;background:#7c6aff;color:#fff;border-radius:9px;text-decoration:none;font-weight:600;margin-bottom:24px'>Acessar agora →</a>
           <p style='color:#6b6b80;font-size:12px'>Guarde sua senha com segurança. Você pode alterá-la nas configurações do seu perfil.</p>
         </div>";
         // Tenta enviar para e-mail real se existir nos dados
-        $realEmail = $data['customer']['email'] ?? null;
+        $realEmail = $customer['email'] ?? null;
         if ($realEmail && filter_var($realEmail, FILTER_VALIDATE_EMAIL)) {
             sendMail($realEmail, "Seu acesso ao {$site} foi liberado!", $html);
         }
@@ -227,11 +255,11 @@ $response = [
     ],
 ];
 
-if ($created && $plainPassword) {
+if ($created) {
+    // Credenciais vão só por e-mail — não expomos senha plaintext na resposta do webhook
     $response['credentials'] = [
-        'email'    => $user['email'],
-        'password' => $plainPassword,
-        'login_url'=> SITE_URL . '/login',
+        'email'     => $user['email'],
+        'login_url' => SITE_URL . '/login',
     ];
 }
 

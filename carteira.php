@@ -50,8 +50,8 @@ $userId    = (int)$user['id'];
 
 // Limpar transações (apenas não-pending)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_tx']) && csrf_verify($_POST['csrf_token'] ?? '')) {
-    $db->prepare('DELETE FROM transactions WHERE user_id=? AND status IN ("failed","refunded") OR (user_id=? AND status="pending" AND pix_expires_at IS NOT NULL AND pix_expires_at < ?)')
-       ->execute([$userId, $userId, $nowTs ?? date('Y-m-d H:i:s')]);
+    $db->prepare('DELETE FROM transactions WHERE user_id=? AND (status IN ("failed","refunded") OR (status="pending" AND pix_expires_at IS NOT NULL AND pix_expires_at < ?))')
+       ->execute([$userId, date('Y-m-d H:i:s')]);
     header('Location: ' . SITE_URL . '/carteira'); exit;
 }
 
@@ -258,7 +258,7 @@ $hasActivePlan = !empty($user['expires_at']) && strtotime($user['expires_at']) >
   <?php foreach ($transactions as $tx):
     $isPaid    = $tx['status'] === 'paid';
     $isPending = $tx['status'] === 'pending';
-    $isExpPix  = $isPending && !empty($tx['pix_expires_at']) && strtotime($tx['pix_expires_at']) < time();
+    $isExpPix  = $isPending && !empty($tx['pix_expires_at']) && ($pixTs = strtotime($tx['pix_expires_at'])) !== false && $pixTs < time();
     $icon      = $isPaid ? '✅' : ($isExpPix ? '⛔' : ($isPending ? '⏳' : '❌'));
     $statusLbl = $isPaid ? 'Pago' : ($isExpPix ? 'PIX expirado' : ($isPending ? 'Aguardando' : ucfirst($tx['status'])));
     $amtColor  = $isPaid ? 'var(--success)' : ($isPending && !$isExpPix ? 'var(--warning)' : 'var(--muted)');

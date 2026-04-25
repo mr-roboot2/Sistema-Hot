@@ -66,11 +66,14 @@ function affiliateCaptureRef(): void {
     $aff->execute([$ref]);
     if (!$aff->fetch()) return;
 
-    // Persiste por 30 dias em cookie
-    $expiry = time() + 30 * 86400;
+    // Persiste por 30 dias em cookie (HttpOnly: só o servidor lê)
+    $expiry  = time() + 30 * 86400;
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+               || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    $cookieOpts = ['expires'=>$expiry,'path'=>'/','samesite'=>'Lax','secure'=>$isHttps,'httponly'=>true];
     if (!headers_sent()) {
-        setcookie('_aff_ref', $ref, ['expires'=>$expiry,'path'=>'/','samesite'=>'Lax']);
-        setcookie('_aff_ts',  (string)time(), ['expires'=>$expiry,'path'=>'/','samesite'=>'Lax']);
+        setcookie('_aff_ref', $ref,              $cookieOpts);
+        setcookie('_aff_ts',  (string)time(),    $cookieOpts);
     }
 
     // Registra o clique (uma vez por IP por dia)
@@ -143,6 +146,11 @@ function affiliateOnPurchase(int $userId, int $txId, float $saleAmount): void {
     $ref->execute([$txId, $userId]);
     $refRow = $ref->fetch();
     if (!$refRow) return;
+
+    // Bloqueia auto-indicação (usuário comprando com próprio link)
+    $affOwner = $db->prepare('SELECT user_id FROM affiliates WHERE id=?');
+    $affOwner->execute([$refRow['affiliate_id']]);
+    if ((int)($affOwner->fetchColumn() ?: 0) === $userId) return;
 
     $commission    = 0;
     $rewardPlanId  = null;

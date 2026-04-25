@@ -18,6 +18,14 @@ if (isset($_GET['check_tx'])) {
 
     $status = checkPixStatus($txId);
     if ($status['status'] === 'paid') {
+        // Se for usuário anônimo, devolve o código de acesso pro front exibir
+        try {
+            $u = getDB()->prepare('SELECT access_code, is_anonymous FROM users WHERE id=?');
+            $u->execute([$userId]); $u = $u->fetch();
+            if ($u && !empty($u['is_anonymous']) && !empty($u['access_code'])) {
+                $status['access_code'] = $u['access_code'];
+            }
+        } catch(Exception $e) {}
         unset($_SESSION['bv_step'],$_SESSION['bv_plan'],$_SESSION['bv_pix']);
         $status['redirect'] = SITE_URL . '/index';
     }
@@ -83,52 +91,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_register'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Token inválido.';
     } else {
-        $name  = trim($_POST['name'] ?? '');
-        $phone = preg_replace('/\D/', '', $_POST['phone'] ?? '');
-        $pass  = $_POST['password'] ?? '';
+        $isAnon = isset($_POST['anonymous']) && $_POST['anonymous'] === '1';
 
-        if (!$name || !$phone || strlen($pass) < 6) {
-            $error = 'Preencha todos os campos. Senha mínimo 6 caracteres.';
-        } elseif (!validateBrazilianPhone($phone)) {
-            $error = 'Telefone inválido (mín. 10 dígitos com DDD).';
-        } else {
-            // Verifica duplicata por telefone
-            try { $db->exec("ALTER TABLE users ADD COLUMN phone VARCHAR(20) DEFAULT NULL"); } catch(Exception $e) {}
-            $chk = $db->prepare('SELECT id FROM users WHERE phone=?');
-            $chk->execute([$phone]);
-            if ($chk->fetch()) {
-                $error = 'Este telefone já está cadastrado. <a href="'.SITE_URL.'/login.php" style="color:var(--accent)">Fazer login</a>';
-            } else {
-                $email = 'user_' . $phone . '@local.cms';
-                $db->prepare('INSERT INTO users (name,email,phone,password,role) VALUES (?,?,?,?,?)')
-                   ->execute([$name, $email, $phone, password_hash($pass, PASSWORD_DEFAULT), 'viewer']);
-                $userId = (int)$db->lastInsertId();
-                // Registra indicação de afiliado
-                if (!function_exists('affiliateOnRegister')) require_once __DIR__ . '/includes/affiliate.php';
-                affiliateOnRegister($userId);
+        if ($isAnon) {
+            // ── Cadastro anônimo — só plano, sem dados pessoais ──
+            ensureAccessCodeColumn();
+            $accessCode = generateAccessCode();
+            $name       = 'Anônimo';
+            $emailSynth = 'anon_' . strtolower(str_replace('-', '', $accessCode)) . '@local.cms';
 
-                // Faz login imediato — acesso só liberado após pagar
-                session_regenerate_id(true);
-                $_SESSION['user_id']   = $userId;
-                $_SESSION['user_name'] = $name;
-                $_SESSION['user_role'] = 'viewer';
+            $db->prepare('INSERT INTO users (name,email,password,role,access_code,is_anonymous) VALUES (?,?,?,?,?,1)')
+               ->execute([$name, $emailSynth, password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT), 'viewer', $accessCode]);
+            $userId = (int)$db->lastInsertId();
 
-                // Gera PIX
-                $plan = $_SESSION['bv_plan'] ?? null;
-                if ($plan) {
-                    $pix = createPixCharge($userId, (int)$plan['id'], (float)$plan['price']);
-                    if ($pix['ok']) {
-                        $_SESSION['bv_pix']  = $pix;
-                        $_SESSION['bv_step'] = 'pix';
-                        $pixData = $pix; $step = 'pix';
-                    } else {
-                        $error = 'Conta criada! Mas houve erro ao gerar PIX: ' . $pix['error'];
-                        $_SESSION['bv_step'] = 'pix';
-                        $step = 'pix';
-                    }
+            if (!function_exists('affiliateOnRegister')) require_once __DIR__ . '/includes/affiliate.php';
+            affiliateOnRegister($userId);
+
+            session_regenerate_id(true);
+            $_SESSION['user_id']       = $userId;
+            $_SESSION['user_name']     = $name;
+            $_SESSION['user_role']     = 'viewer';
+            $_SESSION['bv_access_code'] = $accessCode;
+
+            $plan = $_SESSION['bv_plan'] ?? null;
+            if ($plan) {
+                $pix = createPixCharge($userId, (int)$plan['id'], (float)$plan['price']);
+                if ($pix['ok']) {
+                    $_SESSION['bv_pix']  = $pix;
+                    $_SESSION['bv_step'] = 'pix';
+                    $pixData = $pix; $step = 'pix';
                 } else {
-                    unset($_SESSION['bv_step'],$_SESSION['bv_plan'],$_SESSION['bv_pix']);
-                    header('Location: ' . SITE_URL . '/renovar'); exit;
+                    $error = 'Código gerado! Mas houve erro ao gerar PIX: ' . htmlspecialchars((string)($pix['error'] ?? ''));
+                    $_SESSION['bv_step'] = 'pix';
+                    $step = 'pix';
+                }
+            } else {
+                unset($_SESSION['bv_step'],$_SESSION['bv_plan'],$_SESSION['bv_pix']);
+                header('Location: ' . SITE_URL . '/renovar'); exit;
+            }
+        } else {
+            $name  = trim($_POST['name'] ?? '');
+            $email = strtolower(trim($_POST['email'] ?? ''));
+            $pass  = $_POST['password'] ?? '';
+
+            if (!$name || !$email || strlen($pass) < 6) {
+                $error = 'Preencha todos os campos. Senha mínimo 6 caracteres.';
+            } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $error = 'E-mail inválido.';
+            } else {
+                $chk = $db->prepare('SELECT id FROM users WHERE email=?');
+                $chk->execute([$email]);
+                if ($chk->fetch()) {
+                    $error = 'Este e-mail já está cadastrado. <a href="'.SITE_URL.'/login.php" style="color:var(--accent)">Fazer login</a>';
+                } else {
+                    $db->prepare('INSERT INTO users (name,email,password,role) VALUES (?,?,?,?)')
+                       ->execute([$name, $email, password_hash($pass, PASSWORD_DEFAULT), 'viewer']);
+                    $userId = (int)$db->lastInsertId();
+                    if (!function_exists('affiliateOnRegister')) require_once __DIR__ . '/includes/affiliate.php';
+                    affiliateOnRegister($userId);
+
+                    session_regenerate_id(true);
+                    $_SESSION['user_id']   = $userId;
+                    $_SESSION['user_name'] = $name;
+                    $_SESSION['user_role'] = 'viewer';
+
+                    $plan = $_SESSION['bv_plan'] ?? null;
+                    if ($plan) {
+                        $pix = createPixCharge($userId, (int)$plan['id'], (float)$plan['price']);
+                        if ($pix['ok']) {
+                            $_SESSION['bv_pix']  = $pix;
+                            $_SESSION['bv_step'] = 'pix';
+                            $pixData = $pix; $step = 'pix';
+                        } else {
+                            $error = 'Conta criada! Mas houve erro ao gerar PIX: ' . htmlspecialchars((string)($pix['error'] ?? ''));
+                            $_SESSION['bv_step'] = 'pix';
+                            $step = 'pix';
+                        }
+                    } else {
+                        unset($_SESSION['bv_step'],$_SESSION['bv_plan'],$_SESSION['bv_pix']);
+                        header('Location: ' . SITE_URL . '/renovar'); exit;
+                    }
                 }
             }
         }
@@ -240,28 +282,67 @@ trackingCaptureGoogleClick();
     <div class="card-title">Criar sua conta</div>
     <div class="card-sub">Preencha os dados e gere o PIX para pagamento</div>
 
-    <form method="POST">
+    <form method="POST" id="register-form">
       <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
       <input type="hidden" name="do_register" value="1">
-      <div class="field">
-        <label>Nome completo</label>
-        <input type="text" name="name" required placeholder="Seu nome completo" autofocus value="<?= htmlspecialchars($_POST['name']??'') ?>">
+      <input type="hidden" name="anonymous" id="anon-input" value="0">
+
+      <div id="fields-normal">
+        <div class="field">
+          <label>Nome completo</label>
+          <input type="text" name="name" id="f-name" placeholder="Seu nome completo" autofocus value="<?= htmlspecialchars($_POST['name']??'') ?>">
+        </div>
+        <div class="field">
+          <label>E-mail</label>
+          <input type="email" name="email" id="f-email" placeholder="voce@exemplo.com"
+                 value="<?= htmlspecialchars($_POST['email']??'') ?>" autocomplete="email">
+        </div>
+        <div class="field">
+          <label>Senha <span style="color:var(--muted);font-weight:400">(mín. 6 caracteres)</span></label>
+          <input type="password" name="password" id="f-pass" placeholder="••••••••" minlength="6">
+        </div>
       </div>
-      <div class="field">
-        <label>Telefone / WhatsApp</label>
-        <input type="tel" name="phone" required placeholder="(11) 99999-9999"
-               value="<?= htmlspecialchars($_POST['phone']??'') ?>"
-               oninput="this.value=this.value.replace(/\D/g,'').replace(/^(\d{2})(\d)/,'($1) $2').replace(/(\d{4,5})(\d{4})$/,'$1-$2')">
+
+      <div id="fields-anon" style="display:none;padding:14px;border:1px dashed var(--accent);border-radius:10px;background:rgba(124,106,255,.06);margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:6px">🕶️ Compra anônima</div>
+        <div style="font-size:12px;color:var(--muted2);line-height:1.5">
+          Não pedimos nome, e-mail nem senha.<br>
+          Após confirmar o pagamento, você receberá um <b>código de acesso</b> único.
+          Guarde esse código — ele é a única forma de acessar a plataforma.
+        </div>
       </div>
-      <div class="field">
-        <label>Senha <span style="color:var(--muted);font-weight:400">(mín. 6 caracteres)</span></label>
-        <input type="password" name="password" required placeholder="••••••••" minlength="6">
-      </div>
+
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--muted2);margin-bottom:14px;user-select:none">
+        <input type="checkbox" id="anon-toggle" style="width:16px;height:16px;accent-color:var(--accent);cursor:pointer">
+        <span>🕶️ Prefiro ficar anônimo — receber apenas um código de acesso</span>
+      </label>
+
       <button type="submit" class="btn-full">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-        Criar conta e gerar PIX
+        <span id="btn-register-label">Criar conta e gerar PIX</span>
       </button>
     </form>
+
+    <script>
+    (function(){
+      var toggle = document.getElementById('anon-toggle');
+      var anonInput = document.getElementById('anon-input');
+      var fN = document.getElementById('fields-normal');
+      var fA = document.getElementById('fields-anon');
+      var lbl = document.getElementById('btn-register-label');
+      var inputs = ['f-name','f-email','f-pass'].map(function(id){return document.getElementById(id);});
+      function apply(){
+        var on = toggle.checked;
+        anonInput.value = on ? '1' : '0';
+        fN.style.display = on ? 'none' : '';
+        fA.style.display = on ? '' : 'none';
+        inputs.forEach(function(el){ if(el){ el.required = !on; el.disabled = on; } });
+        if (lbl) lbl.textContent = on ? 'Gerar PIX anônimo' : 'Criar conta e gerar PIX';
+      }
+      toggle.addEventListener('change', apply);
+      apply();
+    })();
+    </script>
 
     <a href="<?= SITE_URL ?>/bem-vindo.php?back=plans" class="btn-back-link">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -307,7 +388,19 @@ trackingCaptureGoogleClick();
     <div id="s-paid" style="display:none;text-align:center;padding:8px 0">
       <div style="font-size:64px;margin-bottom:8px;animation:pop .4s ease">🎉</div>
       <div style="font-family:'Roboto',sans-serif;font-size:22px;font-weight:800;color:var(--success);margin-bottom:8px">Pagamento aprovado!</div>
-      <div style="font-size:14px;color:var(--muted2);margin-bottom:28px">Seu acesso foi liberado com sucesso.</div>
+      <div style="font-size:14px;color:var(--muted2);margin-bottom:20px">Seu acesso foi liberado com sucesso.</div>
+
+      <!-- Bloco do código de acesso (só aparece para usuários anônimos) -->
+      <div id="access-code-block" style="display:none;background:linear-gradient(135deg,rgba(124,106,255,.14),rgba(255,106,158,.1));border:1px solid var(--accent);border-radius:12px;padding:18px;margin-bottom:20px;text-align:left">
+        <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🔐 Seu código de acesso</div>
+        <div style="font-size:12px;color:var(--muted2);margin-bottom:12px;line-height:1.5">Guarde bem este código. É a única forma de entrar novamente na plataforma:</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div id="access-code-value" style="flex:1;font-family:'Courier New',monospace;font-size:20px;font-weight:800;letter-spacing:2px;color:var(--text);background:var(--surface2);padding:12px 14px;border-radius:8px;text-align:center;border:1px solid var(--border)">——————</div>
+          <button onclick="copyAccessCode()" id="btn-copy-code" style="background:var(--accent);color:#fff;border:none;padding:12px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">📋 Copiar</button>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--danger)">⚠️ Este código não pode ser recuperado se você perdê-lo.</div>
+      </div>
+
       <a href="<?= SITE_URL ?>/index.php" class="btn-full" style="text-decoration:none;background:var(--success);display:flex;align-items:center;justify-content:center;gap:8px">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
         Acessar conteúdo
@@ -405,9 +498,32 @@ function poll() {
         if (pt) pt.style.display = 'none';
         if (bl) bl.style.display = 'none';
         if (sp) sp.style.display = 'block';
+
+        // Se for compra anônima, mostra o código de acesso
+        if (d.access_code) {
+          var blk = document.getElementById('access-code-block');
+          var val = document.getElementById('access-code-value');
+          if (val) val.textContent = d.access_code;
+          if (blk) blk.style.display = 'block';
+        }
       }
     })
     .catch(function() {});
+}
+
+function copyAccessCode() {
+  var val = document.getElementById('access-code-value');
+  var btn = document.getElementById('btn-copy-code');
+  if (!val) return;
+  var text = val.textContent.trim();
+  function done(){ if(btn){ btn.textContent = '✅ Copiado!'; setTimeout(function(){ btn.textContent='📋 Copiar'; },2000); } }
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(function(){
+      var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');done();}catch(e){} document.body.removeChild(ta);
+    });
+  } else {
+    var ta=document.createElement('textarea'); ta.value=text; ta.style.cssText='position:fixed;top:-9999px'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');done();}catch(e){} document.body.removeChild(ta);
+  }
 }
 
 var bvDone = false;
@@ -420,15 +536,5 @@ document.addEventListener('visibilitychange', function() {
 });
 </script>
 <?php endif; ?>
-<script>
-document.querySelectorAll('input[name=phone]').forEach(function(inp){
-  inp.addEventListener('input',function(){
-    var v=this.value.replace(/\D/g,'').slice(0,11);
-    if(v.length<=10) v=v.replace(/^(\d{2})(\d{4})(\d{0,4})/,'($1) $2-$3');
-    else v=v.replace(/^(\d{2})(\d{5})(\d{0,4})/,'($1) $2-$3');
-    this.value=v.replace(/-$/,'');
-  });
-});
-</script>
 </body>
 </html>

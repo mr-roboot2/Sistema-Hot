@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
 if (isLoggedIn()) { header('Location: ' . SITE_URL . '/index'); exit; }
+// Auto-login por remember-me pode ter colocado o usuário em estado "expirado"
+if (!empty($_SESSION['expired_user_id'])) { header('Location: ' . SITE_URL . '/expired'); exit; }
 
 $error        = '';
 $kicked       = isset($_GET['kicked']) || !empty($_SESSION['kicked_out']);
@@ -9,12 +11,22 @@ $allowReg     = getSetting('allow_register',      '0') === '1';
 $allowReset   = getSetting('allow_password_reset', '0') === '1';
 $siteName     = getSetting('site_name', SITE_NAME);
 
+$authMode = (($_POST['auth_mode'] ?? $_GET['mode'] ?? '') === 'code') ? 'code' : 'password';
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify($_POST['csrf_token'] ?? '')) {
         $error = 'Token inválido. Recarregue a página.';
     } else {
-        $lr = loginExtended(trim($_POST['phone'] ?? ''), $_POST['password'] ?? '');
+        if ($authMode === 'code') {
+            $lr = loginByAccessCode(trim($_POST['access_code'] ?? ''));
+        } else {
+            $lr = loginExtended(trim($_POST['phone'] ?? ''), $_POST['password'] ?? '');
+        }
         if ($lr['ok']) {
+            // Cria cookie persistente se o usuário marcou "Permanecer conectado"
+            if (!empty($_POST['remember']) && !empty($_SESSION['user_id'])) {
+                setRememberMe((int)$_SESSION['user_id'], 30);
+            }
             // Verifica se tem PIX pendente — redireciona para carteira
             try {
                 $nowTs = date('Y-m-d H:i:s');
@@ -34,7 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Sua conta está suspensa. Entre em contato com o suporte.';
         } else {
             $remaining = $lr['remaining'] ?? null;
-            $error = 'Telefone ou senha incorretos.' . ($remaining !== null && $remaining <= 2 ? " ({$remaining} tentativa" . ($remaining != 1 ? 's' : '') . " restante" . ($remaining != 1 ? 's' : '') . ")" : '');
+            $baseMsg = $authMode === 'code' ? 'Código de acesso inválido.' : 'E-mail ou senha incorretos.';
+            $error = $baseMsg . ($remaining !== null && $remaining <= 2 ? " ({$remaining} tentativa" . ($remaining != 1 ? 's' : '') . " restante" . ($remaining != 1 ? 's' : '') . ")" : '');
         }
     }
 }
@@ -117,13 +130,31 @@ trackingCaptureGoogleClick();
     </div>
     <?php endif; ?>
 
-    <form method="POST">
+    <!-- Abas -->
+    <div class="tabs" style="display:flex;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:18px">
+      <button type="button" class="tab-btn <?= $authMode==='password'?'tab-active':'' ?>" data-mode="password"
+              style="flex:1;padding:9px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;border-radius:7px;cursor:pointer;font-family:'Roboto',sans-serif;transition:all .15s">
+        🔑 E-mail e senha
+      </button>
+      <button type="button" class="tab-btn <?= $authMode==='code'?'tab-active':'' ?>" data-mode="code"
+              style="flex:1;padding:9px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;border-radius:7px;cursor:pointer;font-family:'Roboto',sans-serif;transition:all .15s">
+        🔐 Código de acesso
+      </button>
+    </div>
+    <style>
+      .tab-btn.tab-active{background:var(--bg);color:var(--text) !important;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+    </style>
+
+    <!-- Form: e-mail + senha -->
+    <form method="POST" id="form-password" style="<?= $authMode==='password'?'':'display:none' ?>">
       <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+      <input type="hidden" name="auth_mode" value="password">
       <div class="field">
-        <label>Telefone ou E-mail</label>
-        <input type="text" name="phone" placeholder="(11) 99999-9999" required autofocus
-               autocomplete="username" inputmode="tel"
-               value="<?= htmlspecialchars($_POST['phone'] ?? '') ?>">
+        <label>E-mail ou telefone</label>
+        <input type="text" name="phone" placeholder="voce@exemplo.com"
+               <?= $authMode==='password'?'required autofocus':'' ?>
+               autocomplete="username"
+               value="<?= htmlspecialchars($authMode==='password' ? ($_POST['phone'] ?? '') : '') ?>">
       </div>
       <div class="field">
         <div class="field-row">
@@ -132,10 +163,62 @@ trackingCaptureGoogleClick();
           <a href="<?= SITE_URL ?>/forgot-password">Esqueci a senha</a>
           <?php endif; ?>
         </div>
-        <input type="password" name="password" placeholder="••••••••" required>
+        <input type="password" name="password" placeholder="••••••••" <?= $authMode==='password'?'required':'' ?>>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted2);margin:-4px 0 14px;cursor:pointer;user-select:none">
+        <input type="checkbox" name="remember" value="1" <?= !empty($_POST['remember'])?'checked':'' ?>
+               style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+        Permanecer conectado neste dispositivo por 30 dias
+      </label>
       <button type="submit" class="btn">Entrar na plataforma</button>
     </form>
+
+    <!-- Form: código de acesso -->
+    <form method="POST" id="form-code" style="<?= $authMode==='code'?'':'display:none' ?>">
+      <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+      <input type="hidden" name="auth_mode" value="code">
+      <div class="field">
+        <label>Código de acesso</label>
+        <input type="text" name="access_code" placeholder="XXXX-XXXX-XXXX"
+               <?= $authMode==='code'?'required autofocus':'' ?>
+               autocomplete="off" spellcheck="false"
+               style="text-transform:uppercase;letter-spacing:2px;font-family:'Courier New',monospace;text-align:center;font-weight:700"
+               value="<?= htmlspecialchars($authMode==='code' ? ($_POST['access_code'] ?? '') : '') ?>"
+               oninput="formatAccessCode(this)">
+        <div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5">
+          Recebido após o pagamento anônimo. Não precisa de e-mail nem senha.
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted2);margin:0 0 14px;cursor:pointer;user-select:none">
+        <input type="checkbox" name="remember" value="1" <?= !empty($_POST['remember'])?'checked':'' ?>
+               style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+        Permanecer conectado neste dispositivo por 30 dias
+      </label>
+      <button type="submit" class="btn">Entrar com código</button>
+    </form>
+
+    <script>
+    document.querySelectorAll('.tab-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var mode = btn.dataset.mode;
+        document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.toggle('tab-active', b.dataset.mode === mode); });
+        document.getElementById('form-password').style.display = mode==='password' ? '' : 'none';
+        document.getElementById('form-code').style.display     = mode==='code'     ? '' : 'none';
+        var focusEl = mode==='password' ? document.querySelector('#form-password input[name=phone]')
+                                        : document.querySelector('#form-code input[name=access_code]');
+        if (focusEl) focusEl.focus();
+      });
+    });
+    function formatAccessCode(el){
+      var raw = el.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
+      var out = '';
+      for (var i=0; i<raw.length; i++){
+        if (i===4 || i===8) out += '-';
+        out += raw[i];
+      }
+      el.value = out;
+    }
+    </script>
 
     <?php if ($allowReg): ?>
     <hr class="divider">

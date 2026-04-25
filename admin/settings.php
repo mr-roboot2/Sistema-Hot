@@ -89,6 +89,7 @@ try {
         ['smtp_from',          '',         'E-mail remetente (From)',             'text'],
         // PIX
         ['helix_url',          '',   'URL da API Helix PIX',             'text'],
+        ['helix_verify_ssl',   '1',  'Verificar SSL da API Helix',       'toggle'],
         ['pix_expiry_minutes', '30', 'Expiração PIX (minutos)',          'number'],
         // Remarketing
         ['rm_msg_pix',
@@ -117,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_backup']) && csrf_
     foreach ($tables as $table) {
         // Estrutura
         $create = $db->query("SHOW CREATE TABLE `$table`")->fetch();
+        if (!$create || empty($create['Create Table'])) continue;
         $sql .= "DROP TABLE IF EXISTS `$table`;\n";
         $sql .= $create['Create Table'] . ";\n\n";
         // Dados

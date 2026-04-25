@@ -31,7 +31,7 @@
 
 Options -Indexes
 
-<FilesMatch "\.(sql|log|env|bak|sh|git)$">
+<FilesMatch "\.(sql|log|env|bak|sh|git|gitignore)$">
     Order Allow,Deny
     Deny from all
 </FilesMatch>
@@ -40,6 +40,9 @@ Options -Indexes
     Order Allow,Deny
     Deny from all
 </Files>
+
+# Bloqueia listagem/leitura do diretório .git via web
+RedirectMatch 404 /\.git
 
 # ── Cache de assets estáticos ───────────────────────────
 <IfModule mod_expires.c>
