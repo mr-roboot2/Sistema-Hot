@@ -187,10 +187,9 @@ require __DIR__ . '/includes/header.php';
       $days  = ceil(($expTs - time()) / 86400);
       $expired = $expTs < time();
     ?>
-    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface2);border-radius:9px;font-size:13px">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--surface2);border-radius:9px;font-size:13px;margin-bottom:14px">
       <?php if ($expired): ?>
         <span style="color:var(--danger);font-weight:700">⚠ Acesso expirado</span>
-        <a href="<?= SITE_URL ?>/renovar" class="btn btn-primary" style="margin-left:auto;padding:6px 14px;font-size:12px">Renovar</a>
       <?php else: ?>
         <span style="color:var(--muted2)">Acesso válido até</span>
         <b style="color:var(--text)"><?= date('d/m/Y', $expTs) ?></b>
@@ -198,6 +197,18 @@ require __DIR__ . '/includes/header.php';
       <?php endif; ?>
     </div>
     <?php endif; ?>
+
+    <!-- CTAs sempre visíveis pro anônimo -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <a href="<?= SITE_URL ?>/renovar" class="btn btn-primary" style="flex:1;min-width:160px;justify-content:center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <?= !empty($user['expires_at']) && strtotime($user['expires_at']) > time() ? 'Renovar / estender plano' : 'Comprar plano' ?>
+      </a>
+      <a href="<?= SITE_URL ?>/carteira" class="btn btn-secondary" style="flex:1;min-width:160px;justify-content:center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Carteira / Histórico
+      </a>
+    </div>
   </div>
 
   <!-- Sair -->

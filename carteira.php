@@ -215,19 +215,18 @@ require __DIR__ . '/includes/header.php';
   </div>
 </div>
 
-<!-- Botão renovar -->
+<!-- Botão renovar/comprar -->
 <?php
 $hasPlans = false;
 try { $hasPlans = (bool)$db->query('SELECT COUNT(*) FROM plans WHERE active=1 AND price > 0')->fetchColumn(); } catch(Exception $e) {}
-?>
-<?php
 $hasActivePlan = !empty($user['expires_at']) && strtotime($user['expires_at']) > time();
+$ctaLabel      = $hasActivePlan ? 'Renovar / estender plano' : 'Comprar plano';
 ?>
-<?php if ($hasPlans && !$hasActivePlan): ?>
+<?php if ($hasPlans): ?>
 <div style="margin-bottom:20px">
   <a href="<?= SITE_URL ?>/renovar" class="btn btn-primary" style="display:inline-flex;gap:8px">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-    Comprar plano
+    <?= $ctaLabel ?>
   </a>
 </div>
 <?php endif; ?>
