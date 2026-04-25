@@ -131,18 +131,20 @@ trackingCaptureGoogleClick();
     <?php endif; ?>
 
     <!-- Abas -->
-    <div class="tabs" style="display:flex;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:18px">
-      <button type="button" class="tab-btn <?= $authMode==='password'?'tab-active':'' ?>" data-mode="password"
-              style="flex:1;padding:9px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;border-radius:7px;cursor:pointer;font-family:'Roboto',sans-serif;transition:all .15s">
+    <div class="tabs">
+      <button type="button" class="tab-btn <?= $authMode==='password'?'tab-active':'' ?>" data-mode="password">
         🔑 E-mail e senha
       </button>
-      <button type="button" class="tab-btn <?= $authMode==='code'?'tab-active':'' ?>" data-mode="code"
-              style="flex:1;padding:9px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:600;border-radius:7px;cursor:pointer;font-family:'Roboto',sans-serif;transition:all .15s">
+      <button type="button" class="tab-btn <?= $authMode==='code'?'tab-active':'' ?>" data-mode="code">
         🔐 Código de acesso
       </button>
     </div>
     <style>
-      .tab-btn.tab-active{background:var(--bg);color:var(--text) !important;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+      .tabs{display:flex;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:18px}
+      .tab-btn{flex:1;padding:10px 8px;border:none;background:transparent;color:#b8b8cc;font-size:13px;font-weight:600;border-radius:7px;cursor:pointer;font-family:'Roboto',sans-serif;transition:background .15s,color .15s}
+      .tab-btn:hover{background:rgba(255,255,255,.04);color:var(--text)}
+      .tab-btn.tab-active{background:var(--bg);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+      .tab-btn.tab-active:hover{background:var(--bg)}
     </style>
 
     <!-- Form: e-mail + senha -->
