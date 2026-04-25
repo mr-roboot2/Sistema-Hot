@@ -177,3 +177,5 @@ echo password_hash('minha_senha', PASSWORD_DEFAULT);
 - `categories` — categorias de conteúdo
 - `posts` — postagens (título, descrição, conteúdo, status...)
 - `media` — arquivos vinculados a posts (imagens, vídeos, docs)
+
+<!-- deploy test 2026-04-25 01:11:50 -->
