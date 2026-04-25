@@ -38,6 +38,9 @@ if (isset($_GET['export_csv']) && csrf_verify($_GET['csrf_token'] ?? '')) {
     fclose($out); exit;
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_verify($_POST['csrf_token'] ?? '')) {
+    $error = 'Token CSRF inválido — sessão pode ter expirado. Recarregue a página e tente novamente.';
+}
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify($_POST['csrf_token'] ?? '')) {
     $action = $_POST['action'] ?? '';
     $uid    = (int)($_POST['uid'] ?? 0);
